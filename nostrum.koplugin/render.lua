@@ -81,6 +81,7 @@ package.loaded["ui/font"] = Font
 package.loaded["ui/geometry"] = Geom
 package.loaded["ui/gesturerange"] = { new = function(_, t) return t end }
 package.loaded["ui/widget/infomessage"] = { new = function(_, t) return t end }
+package.loaded["ui/widget/confirmbox"] = { new = function(_, t) t.confirmbox = true; return t end }
 package.loaded["ui/widget/container/inputcontainer"] = Widget
 package.loaded["ui/widget/container/widgetcontainer"] = Widget
 package.loaded["ui/network/manager"] = {}
@@ -495,11 +496,12 @@ assert(synchro.status == "PONT INJOIGNABLE", "statut attendu PONT INJOIGNABLE : 
 assert(#synchro.events == 1, "l'agenda precedent doit rester affiche")
 while derouler() > 0 do end
 
--- Mise a jour automatique : comparaison numerique, une seule installation par
--- session, et rien si la version servie n'est pas plus recente.
-local nv = Nostrum._newer
-assert(nv("1.10", "1.9") and nv("2.0", "1.9.9") and nv("1.0.1", "1.0"), "comparaison de versions")
-assert(not nv("1.0", "1.0") and not nv("1.9", "1.10") and not nv("?", "1.0"), "comparaison de versions (egalite)")
+-- Mise a jour proposee : le Kindle suit la version du Mac. Rien ne s'installe
+-- sans accord, et la question n'est posee qu'une fois par version.
+local UI = package.loaded["ui/uimanager"]
+local montres = {}
+UI.show = function(_, w) montres[#montres + 1] = w end
+UI.close = function() end
 
 local maj_dir = os.tmpname()
 os.remove(maj_dir)
@@ -507,11 +509,27 @@ assert(os.execute("mkdir -p '" .. maj_dir .. "'"))
 local installs = 0
 Pont.manifest = function() return { version = "99.0", files = { { name = "main.lua", size = 8 } } } end
 Pont.file = function() installs = installs + 1; return "return 9" end
-synchro:auto_update(maj_dir)
-assert(installs == 1, "une version plus recente doit etre installee")
+
+synchro:propose_update(maj_dir)
+local question = montres[#montres]
+assert(question and question.confirmbox, "une version differente doit etre proposee")
+assert(question.text:find("99.0", 1, true), "la question doit nommer la version du Mac")
+assert(installs == 0, "rien ne doit s'installer avant l'accord")
+
+question.ok_callback()
+assert(installs == 1, "accepter doit installer la version du Mac")
 local fm = assert(io.open(maj_dir .. "/main.lua")); assert(fm:read("*a") == "return 9"); fm:close()
-synchro:auto_update(maj_dir)
-assert(installs == 1, "une seule installation par session")
+assert(montres[#montres].text:find("Redémarrer", 1, true), "installer doit inviter a redemarrer KOReader")
+
+local avant = #montres
+synchro:propose_update(maj_dir)
+assert(#montres == avant, "la meme version ne doit etre proposee qu'une fois")
+
+-- Meme version des deux cotes : aucune question.
+Pont.manifest = function() return { version = Nostrum.VERSION, files = {} } end
+synchro:propose_update(maj_dir)
+assert(#montres == avant, "aucune question quand les versions concordent")
+UI.show = function() end
 os.execute("rm -rf '" .. maj_dir .. "' '" .. maj_dir .. "/../nostrum-archives'")
 
 local en_clair = ops

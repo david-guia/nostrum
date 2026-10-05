@@ -9,6 +9,7 @@ local Device = require("device")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
+local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local NetworkMgr = require("ui/network/manager")
@@ -21,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.0"
+local VERSION = "1.1"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -1021,8 +1022,8 @@ function View:fetch(attempt)
 
     self:redraw("full")
     self:schedule()
-    -- Apres l'affichage : un telechargement ne doit pas retarder l'ecran.
-    if use_bridge and not bridge_err then self:auto_update() end
+    -- Apres l'affichage : la question ne doit pas retarder l'ecran.
+    if use_bridge and not bridge_err then self:propose_update() end
 end
 
 function View:stopTimers()
@@ -1192,41 +1193,50 @@ local function update_from_bridge(cfg, dir)
     return man.version or "?", #staged
 end
 
--- « 1.10 » est plus recent que « 1.9 » : comparaison champ par champ, pas en texte.
-local function newer(a, b)
-    local x, y = {}, {}
-    for n in tostring(a):gmatch("%d+") do x[#x + 1] = tonumber(n) end
-    for n in tostring(b):gmatch("%d+") do y[#y + 1] = tonumber(n) end
-    for i = 1, math.max(#x, #y) do
-        local p, q = x[i] or 0, y[i] or 0
-        if p ~= q then return p > q end
-    end
-    return false
+-- Installation depuis le pont, avec un message pendant le transfert : les
+-- requetes sont bloquantes, sans lui l'appareil parait fige. Partagee par le
+-- menu et par la proposition faite a la synchro.
+-- `dir` : dossier jetable des controles de render.lua, jamais sur l'appareil.
+local function install_update(cfg, dir)
+    local info = InfoMessage:new{ text = _("Mise à jour depuis le pont...") }
+    UIManager:show(info)
+    UIManager:nextTick(function()
+        ensure_network(function()
+            local version, detail = update_from_bridge(cfg, dir)
+            UIManager:close(info)
+            if not version then
+                UIManager:show(InfoMessage:new{
+                    text = _("Mise à jour impossible :") .. "\n" .. tostring(detail) })
+                return
+            end
+            local msg = string.format(
+                _("Version %s installée (%d fichiers).\nRedémarrer KOReader pour l'activer."), version, detail)
+            if UIManager.askForRestart then
+                UIManager:askForRestart(msg)
+            else
+                UIManager:show(InfoMessage:new{ text = msg })
+            end
+        end)
+    end)
 end
 
--- Mise a jour automatique. L'app du Mac se met a jour seule depuis GitHub et
--- embarque le plugin : des qu'elle sert une version plus recente, le Kindle
--- l'installe a la synchro suivante. Une seule fois par session — le code en
--- memoire reste l'ancien jusqu'au redemarrage de KOReader.
-local pending_update
+-- Le Kindle suit la version du Mac, qui embarque le plugin : quand le pont sert
+-- une autre version que celle-ci, on propose de l'installer. Une seule fois
+-- par version et par session, sinon chaque synchro reposerait la question.
+local offered
 
--- `dir` : dossier jetable des controles de render.lua, jamais sur l'appareil.
-function View:auto_update(dir)
-    if pending_update or not via_bridge(self.cfg) then return end
+function View:propose_update(dir)
+    if not via_bridge(self.cfg) then return end
     local man = Bridge.manifest(self.cfg)
-    if not man or not newer(man.version, VERSION) then return end
-    local version, detail = update_from_bridge(self.cfg, dir)
-    if not version then
-        logger.warn("nostrum: mise a jour automatique:", detail)
-        return
-    end
-    pending_update = version
-    local msg = string.format(_("Nostrum %s est installé.\nRedémarrer KOReader pour l'activer."), version)
-    if UIManager.askForRestart then
-        UIManager:askForRestart(msg)
-    else
-        UIManager:show(InfoMessage:new{ text = msg })
-    end
+    if not man or not man.version or man.version == VERSION or offered == man.version then return end
+    offered = man.version
+    UIManager:show(ConfirmBox:new{
+        text = string.format(_("Le Mac propose Nostrum %s (version installée : %s).\nMettre à jour maintenant ?"),
+            man.version, VERSION),
+        ok_text = _("Mettre à jour"),
+        cancel_text = _("Plus tard"),
+        ok_callback = function() install_update(self.cfg, dir) end,
+    })
 end
 
 --== Plugin ==================================================================
@@ -1346,24 +1356,7 @@ function Nostrum:update()
         UIManager:show(InfoMessage:new{ text = _("Nostrum: ") .. err })
         return
     end
-    -- Le message reste affiche pendant le transfert : les requetes sont
-    -- bloquantes, sans lui l'appareil parait fige.
-    local info = InfoMessage:new{ text = _("Mise à jour depuis le pont...") }
-    UIManager:show(info)
-    UIManager:nextTick(function()
-        ensure_network(function()
-            local version, detail = update_from_bridge(cfg)
-            UIManager:close(info)
-            if not version then
-                UIManager:show(InfoMessage:new{
-                    text = _("Mise à jour impossible :") .. "\n" .. tostring(detail) })
-            else
-                UIManager:show(InfoMessage:new{ text = string.format(
-                    _("Version %s installée (%d fichiers).\nRedémarrer KOReader pour l'activer."),
-                    version, detail) })
-            end
-        end)
-    end)
+    install_update(cfg)
 end
 
 function Nostrum:restore(version)
@@ -1398,6 +1391,5 @@ Nostrum._update = update_from_bridge
 Nostrum._restore = restore_archive
 Nostrum._archived = archived_versions
 Nostrum._toggle_pick = toggle_pick
-Nostrum._newer = newer
 
 return Nostrum

@@ -19,11 +19,9 @@
 // Construction : ./build.sh (application universelle + DMG).
 
 import AppKit
-import CryptoKit
 import EventKit
 import Foundation
 import Network
-import Security
 
 let appName = "Nostrum"
 let bundleID = "me.davidguia.nostrum"
@@ -479,14 +477,19 @@ func geocode(_ city: String, done: @escaping (Result<(String, Double, Double), E
     }.resume()
 }
 
-// MARK: - Mise à jour automatique
+// MARK: - Nouvelle version
 
-/// Publié par pont/publier.sh à chaque version : { "version", "url", "sha256" }.
-/// NOSTRUM_FEED le remplace pour les essais.
-let updateFeed = URL(string: ProcessInfo.processInfo.environment["NOSTRUM_FEED"]
+/// Version officielle, publiée par pont/publier.sh : { "version", "dmg" }.
+/// L'application ne se remplace pas elle-même : elle signale la nouvelle
+/// version et propose de télécharger le DMG. NOSTRUM_FEED la remplace pour
+/// les essais.
+let versionFeed = URL(string: ProcessInfo.processInfo.environment["NOSTRUM_FEED"]
     ?? "https://raw.githubusercontent.com/david-guia/nostrum-releases/main/latest.json")!
+let downloadDMG = URL(string: "https://github.com/david-guia/nostrum-releases/raw/main/Nostrum.dmg")!
+let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 
-/// « 1.10 » est plus récent que « 1.9 » : comparaison champ par champ.
+/// « 1.10 » est plus récent que « 1.9 » : comparaison champ par champ. Plus
+/// récente seulement : une version de travail en avance ne doit rien proposer.
 func isNewer(_ a: String, than b: String) -> Bool {
     let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
     for i in 0..<max(x.count, y.count) {
@@ -496,109 +499,19 @@ func isNewer(_ a: String, than b: String) -> Bool {
     return false
 }
 
-/// La nouvelle version doit être signée par le même certificat que celle qui
-/// tourne. Le sha256 du flux ne protège que d'un téléchargement corrompu ;
-/// ceci protège d'un flux détourné, qui n'a pas la clé privée. Une version
-/// signée ad-hoc a pour exigence son propre cdhash : elle refuse donc toute
-/// mise à jour, ce qui est le bon comportement pour un essai local.
-func signedLikeMe(_ candidate: URL) -> Bool {
-    var me: SecCode?, meStatic: SecStaticCode?, req: SecRequirement?, other: SecStaticCode?
-    guard SecCodeCopySelf([], &me) == errSecSuccess, let me,
-          SecCodeCopyStaticCode(me, [], &meStatic) == errSecSuccess, let meStatic,
-          SecCodeCopyDesignatedRequirement(meStatic, [], &req) == errSecSuccess,
-          SecStaticCodeCreateWithPath(candidate as CFURL, [], &other) == errSecSuccess, let other
-    else { return false }
-    let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
-    return SecStaticCodeCheckValidity(other, flags, req) == errSecSuccess
-}
-
-/// Vérifie le flux à l'ouverture puis toutes les 6 h, installe sans rien
-/// demander et relance l'application. Le pont est coupé deux secondes : le
-/// Kindle retente à sa synchro suivante, puis installe à son tour le plugin
-/// embarqué dans la nouvelle version.
-final class Updater {
-    let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-    private var busy = false
-    private var timer: Timer?
-
-    func start() {
-        check()
-        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.check() }
-    }
-
-    private func log(_ msg: String) { print("mise a jour : \(msg)") }
-
-    func check() {
-        guard !busy else { return }
-        busy = true
-        var req = URLRequest(url: updateFeed)
-        req.cachePolicy = .reloadIgnoringLocalCacheData
-        URLSession.shared.dataTask(with: req) { [self] data, _, _ in
-            guard let data,
-                  let feed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let version = feed["version"] as? String, isNewer(version, than: current),
-                  let link = (feed["url"] as? String).flatMap(URL.init(string:)),
-                  let sum = feed["sha256"] as? String
-            else { busy = false; return }
-            log("\(current) -> \(version)")
-            URLSession.shared.downloadTask(with: link) { [self] file, _, error in
-                defer { busy = false }
-                guard let file else { return log("telechargement : \(error?.localizedDescription ?? "?")") }
-                do { try install(zip: file, sha256: sum) } catch { log(error.localizedDescription) }
-            }.resume()
-        }.resume()
-    }
-
-    private func fail(_ msg: String) -> NSError {
-        NSError(domain: appName, code: 2, userInfo: [NSLocalizedDescriptionKey: msg])
-    }
-
-    private func install(zip: URL, sha256: String) throws {
-        let fm = FileManager.default
-        let digest = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-        guard digest == sha256.lowercased() else { throw fail("sha256 different, archive refusee") }
-
-        let work = fm.temporaryDirectory.appendingPathComponent("nostrum-maj-\(UUID().uuidString)")
-        try fm.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: work) }
-        let unzip = Process()
-        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        unzip.arguments = ["-x", "-k", zip.path, work.path]
-        try unzip.run()
-        unzip.waitUntilExit()
-        let fresh = work.appendingPathComponent("Nostrum.app")
-        guard unzip.terminationStatus == 0, fm.fileExists(atPath: fresh.path) else { throw fail("archive illisible") }
-        guard signedLikeMe(fresh) else { throw fail("signature differente, mise a jour refusee") }
-
-        // L'ancienne version part à la corbeille plutôt que d'être effacée :
-        // une mise à jour ratée se défait à la main.
-        let installed = Bundle.main.bundleURL
-        var trashed: NSURL?
-        try fm.trashItem(at: installed, resultingItemURL: &trashed)
-        do {
-            try fm.moveItem(at: fresh, to: installed)
-        } catch {
-            if let old = trashed as URL? { try? fm.moveItem(at: old, to: installed) }
-            throw error
-        }
-        log("installee, relance")
-        DispatchQueue.main.async { relaunch(installed) }
-    }
-}
-
-/// Relance par LaunchServices et non par un processus fils : lancée à
-/// l'ouverture de session, l'application est un job launchd, et launchd tue
-/// les fils d'un job qui se termine. La nouvelle instance attend que
-/// celle-ci soit partie (--relaunch) avant de prendre le port — d'où un
-/// départ sans attendre la fin de son lancement, qui attend justement ce
-/// départ : les deux se bloquaient mutuellement.
-func relaunch(_ app: URL) {
-    let cfg = NSWorkspace.OpenConfiguration()
-    cfg.arguments = ["--login", "--relaunch"]
-    cfg.createsNewApplicationInstance = true
-    cfg.activates = false
-    NSWorkspace.shared.openApplication(at: app, configuration: cfg, completionHandler: nil)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSApp.terminate(nil) }
+/// Rend la version publiée si elle est plus récente que celle qui tourne.
+/// Sans réseau ou sans réponse lisible : rien, on réessaiera plus tard.
+func checkLatest(_ found: @escaping (String, URL) -> Void) {
+    var req = URLRequest(url: versionFeed)
+    req.cachePolicy = .reloadIgnoringLocalCacheData
+    URLSession.shared.dataTask(with: req) { data, _, _ in
+        guard let data,
+              let feed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = feed["version"] as? String, isNewer(version, than: currentVersion)
+        else { return }
+        let dmg = (feed["dmg"] as? String).flatMap(URL.init(string:)) ?? downloadDMG
+        DispatchQueue.main.async { found(version, dmg) }
+    }.resume()
 }
 
 /// Rangée dans un dossier Applications : seule cette copie s'inscrit au
@@ -641,20 +554,14 @@ func die(_ msg: String, _ code: Int32) -> Never {
 }
 
 // Lancé deux fois (ouverture de session + double-clic), le second échouerait sur
-// le port déjà pris : il laisse la main au premier. Sauf après une mise à jour,
-// où c'est l'ancienne version qui part : on attend qu'elle ait fini.
+// le port déjà pris : il laisse la main au premier.
 if let other = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
     .first(where: { $0 != NSRunningApplication.current }) {
-    if CommandLine.arguments.contains("--relaunch") {
-        for _ in 0..<50 where !other.isTerminated { usleep(200_000) }
-    } else {
-        other.activate()
-        exit(0)
-    }
+    other.activate()
+    exit(0)
 }
 
 let atLogin = CommandLine.arguments.contains("--login")
-let updater = Updater()
 var settings = Settings.load()
 let store = Store()
 let prefs = Prefs()
@@ -757,6 +664,10 @@ final class Panel: NSObject, NSApplicationDelegate {
     private let kindleState = NSTextField(labelWithString: "")
     private let installButton = NSButton(title: "Installer sur la Kindle", target: nil, action: nil)
     private let footer = NSTextField(labelWithString: "")
+    private let updateButton = NSButton(title: "", target: nil, action: nil)
+    /// Version publiée plus récente, et le DMG à télécharger.
+    private var available: (version: String, dmg: URL)?
+    private var timer: Timer?
     var listening = false
     var accessDenied: [String] = []
 
@@ -960,7 +871,11 @@ final class Panel: NSObject, NSApplicationDelegate {
         let remove = NSButton(title: "Désinstaller…", target: self, action: #selector(uninstall))
         remove.bezelStyle = .rounded
         remove.controlSize = .small
-        let bas = NSStackView(views: [footer, remove])
+        updateButton.target = self
+        updateButton.action = #selector(download)
+        updateButton.bezelStyle = .rounded
+        updateButton.controlSize = .small
+        let bas = NSStackView(views: [footer, updateButton, remove])
 
         let tout = NSStackView(views: [
             section("Kindle"), city, buttons, kindleState,
@@ -984,6 +899,8 @@ final class Panel: NSObject, NSApplicationDelegate {
     }
 
     func refreshFooter() {
+        updateButton.isHidden = available == nil
+        updateButton.title = available.map { "Télécharger la version \($0.version)" } ?? ""
         let ips = localIPv4()
         footer.stringValue = !listening ? "Pont en cours de démarrage…"
             : ips.isEmpty ? "Pont actif, mais ce Mac n'est sur aucun réseau local."
@@ -994,6 +911,32 @@ final class Panel: NSObject, NSApplicationDelegate {
         guard let (_, kind, noms) = boxes.first(where: { $0.0 === sender }) else { return }
         prefs.set(kind, sender.title, on: sender.state == .on, all: noms)
         DispatchQueue.global().async { updateBadge() }
+    }
+
+    // MARK: Nouvelle version
+
+    @objc func download() {
+        if let available { NSWorkspace.shared.open(available.dmg) }
+    }
+
+    /// Proposée une fois par version et par lancement : la question revient au
+    /// prochain lancement si l'utilisateur a répondu « Plus tard ». Le bouton
+    /// du pied de fenêtre, lui, reste tant que la version n'est pas installée.
+    private func offer(_ version: String, _ dmg: URL) {
+        guard available?.version != version else { return }
+        available = (version, dmg)
+        refreshFooter()
+        let a = NSAlert()
+        a.messageText = "Nostrum \(version) est disponible."
+        a.informativeText = """
+            Vous utilisez la version \(currentVersion). Téléchargez la nouvelle version, \
+            ouvrez le DMG et glissez Nostrum dans Applications pour remplacer l'ancienne.
+            Le Kindle proposera ensuite sa propre mise à jour à la synchronisation suivante.
+            """
+        a.addButton(withTitle: "Télécharger")
+        a.addButton(withTitle: "Plus tard")
+        NSApp.activate(ignoringOtherApps: true)
+        if a.runModal() == .alertFirstButtonReturn { download() }
     }
 
     func show() {
@@ -1013,7 +956,14 @@ final class Panel: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerAtLogin()
-        if isInstalled() || ProcessInfo.processInfo.environment["NOSTRUM_FEED"] != nil { updater.start() }
+        // Version officielle vérifiée à l'ouverture puis toutes les 6 h : l'app
+        // tourne en permanence, une vérification au lancement seul ne verrait
+        // une publication qu'à l'ouverture de session suivante.
+        checkLatest(offer)
+        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            checkLatest(self.offer)
+        }
         if !atLogin { show() }
         // Accès demandés hors du fil principal : une invite système sans réponse
         // ne doit pas figer la fenêtre. La fenêtre se reconstruit ensuite, avec

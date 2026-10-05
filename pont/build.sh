@@ -1,15 +1,15 @@
 #!/bin/sh
-# Construit Nostrum.app (Apple Silicon + Intel), le DMG pour les nouveaux
-# clients et le zip de mise à jour automatique, dans ../dist/.
+# Construit Nostrum.app (Apple Silicon + Intel) et le DMG à distribuer, dans
+# ../dist/.
 #
 #   ./build.sh                     signe avec la première identité du trousseau
 #   SIGN_ID="Apple Development: …" ./build.sh
 #
 # Signature : un certificat, même gratuit (Apple Development), donne à
-# l'application une identité stable. macOS garde alors l'accès aux Rappels
-# d'une version à l'autre, et l'application n'accepte de mise à jour que
-# signée par ce même certificat. À défaut, signature ad-hoc : tout fonctionne
-# sauf la mise à jour automatique, qui est refusée.
+# l'application une identité stable : macOS garde l'accès aux Rappels et au
+# Calendrier quand le client remplace une version par la suivante. À défaut,
+# signature ad-hoc : tout fonctionne, mais macOS redemande ces accès à chaque
+# nouvelle version.
 #
 # Dans les deux cas l'application n'est pas notarisée : au premier lancement,
 # macOS la bloque et le client passe par Réglages Système → Confidentialité et
@@ -31,7 +31,6 @@ trap 'rm -rf "$BUILD"' EXIT
 APP="$BUILD/Nostrum.app"
 STAGE="$BUILD/dmg"
 DMG="$DIST/Nostrum-$VERSION.dmg"
-ZIP="$DIST/Nostrum-$VERSION.zip"
 
 echo "1/6  controles du plugin"
 (cd "$PLUGIN" && lua test.lua >/dev/null && lua render.lua >/dev/null 2>&1) \
@@ -97,7 +96,7 @@ echo "5/6  signature"
 SIGN_ID=${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk 'NR==1 && /\)/ {print $2}')}
 if [ -z "$SIGN_ID" ]; then
     SIGN_ID="-"
-    echo "     ad-hoc : aucune identite de signature. Pas de mise a jour automatique."
+    echo "     ad-hoc : aucune identite de signature. Acces Rappels redemandes a chaque version."
 fi
 codesign --force --deep --sign "$SIGN_ID" --identifier me.davidguia.nostrum "$APP"
 codesign -dv "$APP" 2>&1 | sed -n 's/^Authority=/     signe : /p' | head -1
@@ -109,12 +108,8 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 cp -X Lisez-moi.html "$STAGE/Lisez-moi.html"
 hdiutil create -quiet -volname "Nostrum $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-# Archive de mise a jour : l'application seule, que la version installee
-# telecharge, verifie et met a la place de la sienne.
-ditto -c -k --keepParent "$APP" "$ZIP"
 # L'application seule aussi, pour l'essayer sans monter le DMG.
 ditto "$APP" "$DIST/Nostrum.app"
 
 echo
-echo "Pret : $DMG et $ZIP"
-echo "sha256 du zip : $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+echo "Pret : $DMG"
