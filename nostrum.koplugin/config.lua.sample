@@ -1,0 +1,43 @@
+-- Configuration manuelle. Normalement inutile : l'application Nostrum du Mac
+-- écrit ce fichier elle-même (« Installer sur la Kindle »).
+-- Pour l'écrire à la main : copier ce fichier en `config.lua`, puis remplir.
+
+return {
+    -- Pont Nostrum sur le Mac ------------------------------------------------
+    -- Le jeton est dans ~/Library/Application Support/Nostrum/settings.json.
+    -- Il suffit à tout : agenda et rappels passent par le Mac.
+    bridge_token = nil,
+    bridge_port = 8843,
+    -- Facultatif : si aucune adresse ne répond, le Kindle cherche le Mac seul
+    -- sur le réseau local.
+    bridge_url = nil,         -- ex : { "http://192.168.1.14:8843" }
+
+    -- Mode avancé : agenda en CalDAV direct --------------------------------
+    -- Renseignés, ces identifiants font lire l'agenda directement sur iCloud :
+    -- il reste affiché Mac éteint. Les rappels passent toujours par le pont.
+    -- Mot de passe d'application, jamais le principal :
+    -- appleid.apple.com > Connexion et sécurité > Mots de passe pour applications.
+    -- username = "vous@example.com",
+    -- password = "xxxx-xxxx-xxxx-xxxx",
+    -- server = "https://caldav.icloud.com/",
+
+    -- nil ou {} = tout prendre. Sinon noms exacts affichés dans Calendrier / Rappels.
+    -- Le choix fait dans l'app du Mac ou le menu du Kindle passe avant.
+    calendars = nil,
+    reminder_lists = nil,
+
+    days = 1,                 -- jours d'agenda affichés à partir d'aujourd'hui
+    refresh_minutes = 60,     -- resynchro automatique tant que l'écran est ouvert
+
+    -- Correction manuelle du décalage horaire, en secondes. Laisser à 0 :
+    -- à n'utiliser que si les heures affichées sont systématiquement décalées.
+    tz_offset = 0,
+
+    -- Météo Open-Meteo, sans clé ni compte.
+    weather = {
+        enabled = true,
+        name = "DIJON",
+        lat = 47.3220,
+        lon = 5.0415,
+    },
+}

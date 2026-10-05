@@ -1,0 +1,10 @@
+# Écrit par l'application Mac sur chaque Kindle : porte le jeton du pont.
+config.lua
+
+# Sortie de pont/build.sh : le DMG est publié en Release, pas versionné.
+dist/
+
+# Traces et aperçus locaux.
+debug.txt
+*.png
+.DS_Store

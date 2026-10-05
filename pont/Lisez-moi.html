@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nostrum — installation</title>
+<style>
+  :root { color-scheme: light dark; --ink: #111; --bg: #fafafa; --dim: #666; --line: #ddd; --box: #fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #eee; --bg: #0b0b0b; --dim: #9a9a9a; --line: #333; --box: #151515; }
+  }
+  body { font: 16px/1.55 -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink);
+         background: var(--bg); max-width: 760px; margin: 40px auto; padding: 0 24px; }
+  header { border: 2px solid var(--ink); padding: 18px 22px; margin-bottom: 32px; }
+  header h1 { font: 700 34px/1 ui-monospace, Menlo, monospace; letter-spacing: .25em; margin: 0; }
+  header p { font: 13px ui-monospace, Menlo, monospace; letter-spacing: .12em; color: var(--dim);
+             margin: 8px 0 0; text-transform: uppercase; }
+  h2 { font: 700 14px ui-monospace, Menlo, monospace; letter-spacing: .15em; text-transform: uppercase;
+       border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-top: 40px; }
+  li { margin: 6px 0; }
+  code, kbd { font: 14px ui-monospace, Menlo, monospace; background: var(--box);
+              border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  pre { background: var(--box); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px;
+        overflow-x: auto; }
+  pre code { border: 0; padding: 0; }
+  .note { border-left: 3px solid var(--ink); padding: 4px 14px; margin: 16px 0; color: var(--dim); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NOSTRUM</h1>
+  <p>L'ordinateur de bord de votre journée</p>
+</header>
+
+<p>Nostrum affiche sur votre Kindle votre agenda du jour, vos rappels Apple et la météo,
+et vous permet de cocher les rappels du bout du doigt. Votre Mac lit l'agenda et les
+rappels, puis les envoie au Kindle par votre réseau Wi-Fi.</p>
+
+<h2>Avant de commencer</h2>
+<ul>
+  <li>Un Mac sous macOS 12 ou plus récent, connecté au même réseau que le Kindle.</li>
+  <li>Un Kindle <strong>déjà jailbreaké</strong>, avec <strong>KOReader</strong> installé.
+      Nostrum ne s'occupe pas du jailbreak.</li>
+  <li>Le câble USB du Kindle.</li>
+</ul>
+
+<h2>1. Installer l'application</h2>
+<ol>
+  <li>Dans cette fenêtre, faites glisser <strong>Nostrum</strong> sur le dossier <strong>Applications</strong>.</li>
+  <li>Ouvrez le dossier Applications et double-cliquez sur <strong>Nostrum</strong>.</li>
+</ol>
+
+<h2>2. Autoriser l'ouverture (une seule fois)</h2>
+<p>Nostrum est distribuée en dehors de l'App Store. Au premier lancement, macOS affiche
+<em>« Apple n'a pas pu confirmer que Nostrum ne contient pas de logiciel malveillant »</em>.
+Cliquez sur <strong>Terminé</strong>, puis :</p>
+<ol>
+  <li>Ouvrez <strong>Réglages Système → Confidentialité et sécurité</strong>.</li>
+  <li>Descendez jusqu'à la section <strong>Sécurité</strong> : la ligne
+      <em>« Nostrum a été bloquée… »</em> apparaît.</li>
+  <li>Cliquez sur <strong>Ouvrir quand même</strong>, saisissez le mot de passe du Mac,
+      puis <strong>Ouvrir</strong>.</li>
+</ol>
+<div class="note">Une autre méthode existe : coller la commande suivante dans le Terminal, puis
+relancer Nostrum.</div>
+<pre><code>xattr -dr com.apple.quarantine /Applications/Nostrum.app</code></pre>
+
+<h2>3. Donner accès aux Rappels et au Calendrier</h2>
+<p>Nostrum demande l'accès à vos <strong>Rappels</strong> puis à votre <strong>Calendrier</strong> :
+acceptez les deux. Vos données restent sur votre Mac et votre réseau local. Rien n'est
+envoyé sur Internet, et aucun mot de passe Apple n'est demandé.</p>
+<p>Si macOS demande d'<em>accepter les connexions entrantes</em>, cliquez sur
+<strong>Autoriser</strong> : c'est par là que le Kindle se connecte.</p>
+
+<h2>4. Installer Nostrum sur le Kindle</h2>
+<ol>
+  <li>Branchez le Kindle au Mac en USB.</li>
+  <li>Dans la fenêtre Nostrum, saisissez votre ville (pour la météo).</li>
+  <li>Cliquez sur <strong>Installer sur la Kindle</strong>, puis sur <strong>Éjecter la Kindle</strong>.</li>
+  <li>Débranchez le Kindle et redémarrez KOReader.</li>
+  <li>Dans KOReader : menu <kbd>☰</kbd> → <strong>Outils</strong> → <strong>Nostrum</strong> → <strong>Ouvrir</strong>.</li>
+</ol>
+<div class="note">Si votre Kindle n'apparaît pas comme un disque sur le Mac (modèles récents),
+utilisez <strong>Enregistrer dans un dossier…</strong>, puis copiez le dossier
+<code>nostrum.koplugin</code> dans <code>koreader/plugins/</code> sur le Kindle.</div>
+
+<h2>Au quotidien</h2>
+<p>Nostrum démarre tout seul à l'ouverture de session. Son icône dans le Dock affiche le
+nombre de rappels en attente ; cliquez dessus pour choisir les calendriers et les listes
+affichés sur le Kindle.</p>
+<p><strong>Le Mac doit rester allumé et réveillé</strong> pour que le Kindle se synchronise.
+Sur un Mac de bureau : Réglages Système → Énergie → <em>Empêcher la suspension automatique
+lorsque l'écran est éteint</em>.</p>
+
+<table>
+  <tr><th>Sur le Kindle</th><th>Effet</th></tr>
+  <tr><td>Toucher un rappel</td><td>le coche ou le décoche (sur tous vos appareils Apple)</td></tr>
+  <tr><td>Toucher le bas de l'écran</td><td>resynchronise</td></tr>
+  <tr><td>Toucher <code>CLAIR</code> / <code>SOMBRE</code></td><td>change le thème</td></tr>
+  <tr><td>Toucher le bandeau du haut, ou balayer vers la droite</td><td>revient à KOReader</td></tr>
+</table>
+
+<h2>Dépannage</h2>
+<table>
+  <tr><th>Le Kindle affiche</th><th>À faire</th></tr>
+  <tr><td><code>PONT INJOIGNABLE</code></td><td>Vérifiez que le Mac est allumé, sur le même Wi-Fi, et que
+    Nostrum est ouvert (icône dans le Dock). Si le pare-feu du Mac est actif : Réglages Système →
+    Réseau → Coupe-feu → Options → autoriser Nostrum.</td></tr>
+  <tr><td><code>pont: jeton refuse</code></td><td>Le Kindle a été installé depuis un autre Mac, ou
+    Nostrum a été réinstallée : rebranchez le Kindle et cliquez à nouveau sur
+    <strong>Installer sur la Kindle</strong>.</td></tr>
+  <tr><td><code>PONT SANS TÂCHE</code></td><td>Aucun rappel en attente dans les listes choisies.</td></tr>
+  <tr><td><code>WIFI COUPÉ</code></td><td>Activez le Wi-Fi dans KOReader (<kbd>☰</kbd> → Réseau).</td></tr>
+  <tr><td>Heures décalées</td><td>Réglez le fuseau horaire du Kindle, ou <code>tz_offset</code> (en secondes)
+    dans <code>koreader/plugins/nostrum.koplugin/config.lua</code>.</td></tr>
+</table>
+
+<h2>Mises à jour</h2>
+<p>Rien à faire : Nostrum se met à jour tout seul sur le Mac, puis installe la nouvelle version
+sur le Kindle à la synchronisation suivante. Le Kindle propose alors de redémarrer KOReader
+pour l'activer.</p>
+
+<h2>Désinstaller</h2>
+<p>Ouvrez Nostrum → <strong>Désinstaller…</strong>, puis mettez l'application à la corbeille. Sur le
+Kindle, supprimez le dossier <code>koreader/plugins/nostrum.koplugin</code>.</p>
+
+</body>
+</html>
