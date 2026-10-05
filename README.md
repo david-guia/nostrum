@@ -73,3 +73,8 @@ lua render.lua | python3 render.py DroidSansMono.ttf apercu.png   # écran + syn
 ```
 
 Routes du pont : en-tête de `pont/nostrum-pont.swift`.
+
+## Licence
+
+MIT, voir `LICENSE`. La police `DroidSansMono.ttf`, utilisée seulement pour
+l'aperçu de l'écran, reste sous licence Apache 2.0.
