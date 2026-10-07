@@ -12,9 +12,11 @@ return {
     -- sur le réseau local.
     bridge_url = nil,         -- ex : { "http://192.168.1.14:8843" }
 
-    -- Mode avancé : agenda en CalDAV direct --------------------------------
-    -- Renseignés, ces identifiants font lire l'agenda directement sur iCloud :
-    -- il reste affiché Mac éteint. Les rappels passent toujours par le pont.
+    -- Secours iCloud, Mac éteint ---------------------------------------------
+    -- Normalement écrits par l'app Mac (section « Agenda sans le Mac »).
+    -- Le pont reste interrogé d'abord ; injoignable, l'agenda est lu
+    -- directement sur iCloud. Sans pont (pas de bridge_token), c'est la seule
+    -- source de l'agenda. Les rappels demandent toujours le pont.
     -- Mot de passe d'application, jamais le principal :
     -- appleid.apple.com > Connexion et sécurité > Mots de passe pour applications.
     -- username = "vous@example.com",
