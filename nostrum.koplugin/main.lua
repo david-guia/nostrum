@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.2"
+local VERSION = "1.3"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -498,6 +498,8 @@ function View:paintTo(bb, x, y)
         wide(bb, L + p(408), gy, row[4], f_small, INK, 1, true, R)
         gy = gy + p(18)
     end
+    -- Bandeau + grille : tout ce que la minute fait bouger (heure, batterie).
+    self.clock_zone = Geom:new{ x = x, y = band_top, w = W, h = gy - band_top }
 
     gy = gy + p(6)
     ticks(bb, L, R, gy, p(7), p(4), FAINT)
@@ -1063,6 +1065,21 @@ end
 function View:stopTimers()
     if self.tick then UIManager:unschedule(self.tick) end
     if self.retry then UIManager:unschedule(self.retry) end
+    if self.clock_tick then UIManager:unschedule(self.clock_tick) end
+end
+
+-- Horloge. L'ecran n'est repeint qu'a la synchro ou sur un toucher : sans ce
+-- minuteur, l'heure affichee restait celle de la derniere synchro. Cale sur le
+-- changement de minute, et seulement le haut de l'ecran : un rafraichissement
+-- partiel clignote moins en e-ink et n'entre pas dans le compte des plein
+-- ecran de redraw().
+function View:start_clock()
+    if self.clock_tick then UIManager:unschedule(self.clock_tick) end
+    self.clock_tick = function()
+        if self.clock_zone then UIManager:setDirty(self, "ui", self.clock_zone) end
+        self:start_clock()
+    end
+    UIManager:scheduleIn(math.max(1, 60 - tonumber(os.date("%S"))), self.clock_tick)
 end
 
 function View:schedule()
@@ -1079,6 +1096,8 @@ end
 -- les reglages « restaurer le wifi au reveil » de l'appareil.
 -- Pas de valeur de retour : l'evenement est diffuse a toute la pile.
 function View:onResume()
+    -- Le minuteur de l'horloge s'est fige lui aussi : on le recale.
+    self:start_clock()
     -- Deux appuis sur le bouton veille ne doivent pas synchroniser deux fois.
     if self.last_sync and os.time() - self.last_sync < 60 then return end
     self:sync()
@@ -1416,6 +1435,7 @@ function Nostrum:open()
         light = G_reader_settings and G_reader_settings:isTrue("nostrum_light") or false,
     }
     UIManager:show(view)
+    view:start_clock()
     view:sync()
 end
 

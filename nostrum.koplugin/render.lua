@@ -90,9 +90,16 @@ package.loaded["ui/rendertext"] = RenderText
 -- derouler l'attente du reveil sans dormir vraiment.
 local differes = {}
 local peints = {}
-package.loaded["ui/uimanager"] = { setDirty = function(_, cible, mode) peints[#peints + 1] = { cible = cible, mode = mode } end,
-                                   unschedule = function() end,
-                                   scheduleIn = function(_, _, fn) differes[#differes + 1] = fn end,
+local dernier_delai
+package.loaded["ui/uimanager"] = { setDirty = function(_, cible, mode, zone) peints[#peints + 1] = { cible = cible, mode = mode, zone = zone } end,
+                                   -- Retire vraiment : un minuteur qui se
+                                   -- reprogramme tournerait sinon sans fin.
+                                   unschedule = function(_, fn)
+                                       for i = #differes, 1, -1 do
+                                           if differes[i] == fn then table.remove(differes, i) end
+                                       end
+                                   end,
+                                   scheduleIn = function(_, delai, fn) differes[#differes + 1] = fn; dernier_delai = delai end,
                                    nextTick = function(_, fn) fn() end,
                                    show = function() end }
 local function derouler()
@@ -312,7 +319,32 @@ assert(synchros == 1, "le reveil doit resynchroniser")
 reveil.last_sync = os.time()
 reveil:onResume()
 assert(synchros == 1, "une synchro de moins d'une minute doit suffire")
+reveil:stopTimers()
 while derouler() > 0 do end
+
+-- Horloge : l'heure affichee suivait la derniere synchro. Le minuteur repeint
+-- le haut de l'ecran a chaque changement de minute, sans plein ecran.
+local horloge = Nostrum.View:new{ cfg = view.cfg }
+horloge:paintTo(bb, 0, 0)
+assert(horloge.clock_zone and horloge.clock_zone.y > 0 and horloge.clock_zone.h > 0,
+    "zone de l'horloge non relevee")
+assert(horloge.clock_zone.y + horloge.clock_zone.h < view.rows[1].top,
+    "la zone de l'horloge ne doit pas couvrir la liste des taches")
+horloge:start_clock()
+local attendu = 60 - tonumber(os.date("%S"))
+assert(dernier_delai >= 1 and dernier_delai <= 60 and math.abs(dernier_delai - attendu) <= 1,
+    "le minuteur doit viser le prochain changement de minute : " .. tostring(dernier_delai))
+peints = {}
+assert(derouler() == 1, "un seul minuteur d'horloge attendu")
+assert(#peints == 1 and peints[1].mode == "ui" and peints[1].zone == horloge.clock_zone,
+    "chaque minute : rafraichissement partiel de la seule zone de l'horloge")
+assert(#differes == 1, "le minuteur doit se reprogrammer pour la minute suivante")
+-- Reveil : le minuteur fige est recale, sans en empiler un second.
+horloge.sync = function() end
+horloge:onResume()
+assert(#differes == 1, "le reveil ne doit pas doubler le minuteur")
+horloge:stopTimers()
+assert(#differes == 0, "fermer l'ecran doit arreter l'horloge")
 
 -- Choix des sources depuis le Kindle. « Rien de coche » veut dire « tout
 -- afficher » : c'est la convention de config.lua, et un menu qui la trahirait
