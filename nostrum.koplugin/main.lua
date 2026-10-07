@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.1"
+local VERSION = "1.2"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -146,14 +146,15 @@ local function is_transport_error(err)
         or err:find("timeout", 1, true) ~= nil
         or err:find("host not found", 1, true) ~= nil
         or err:find("connection refused", 1, true) ~= nil
+        or err:find("introuvable", 1, true) ~= nil
 end
 
 -- Le pont prend la main des que config.lua porte son jeton : c'est ce qu'ecrit
 -- l'application Mac a l'installation. Les identifiants iCloud deviennent alors
--- facultatifs ; renseignes, l'agenda reste en CalDAV direct et survit au Mac
--- eteint, seules les taches passent par le pont.
+-- facultatifs ; renseignes (depuis l'app Mac), ils servent de secours : Mac
+-- eteint, l'agenda est lu directement sur iCloud.
 local function via_bridge(cfg) return ok_bridge and cfg.bridge_token ~= nil end
-local function agenda_via_bridge(cfg) return via_bridge(cfg) and not cfg.username end
+local function has_icloud(cfg) return cfg.username ~= nil and cfg.password ~= nil end
 
 --== Vue =====================================================================
 
@@ -511,7 +512,7 @@ function View:paintTo(bb, x, y)
     local ry = rail_top + p(16)
     for _, kv in ipairs({
         { "SYNCHRO", self.last_sync and os.date("%H:%M", self.last_sync) or "--:--" },
-        { "SOURCE", via_bridge(self.cfg) and "PONT" or "ICLOUD" },
+        { "SOURCE", self.source or (via_bridge(self.cfg) and "PONT" or "ICLOUD") },
         { "DIRECTIVES", tostring(#self.todos) },
         { "CONTACTS", tostring(#self.events) },
     }) do
@@ -849,26 +850,40 @@ function View:fetch(attempt)
     -- dans les reglages de l'appareil, pour que le menu du Kindle montre ce qui
     -- s'applique vraiment et serve encore quand le Mac est eteint.
     -- Rien de coche cote pont = aucun filtre impose, le reglage local garde la main.
-    if via_bridge(cfg) and G_reader_settings then
-        local pref = Bridge.prefs(cfg)
+    --
+    -- C'est aussi la premiere requete au pont : injoignable ici, il l'est pour
+    -- toute la synchro. On ne le redemande pas pour l'agenda et les taches —
+    -- chaque essai coute un delai d'attente, ecran fige.
+    local bridge_down
+    if via_bridge(cfg) then
+        local pref, perr = Bridge.prefs(cfg)
+        if not pref and is_transport_error(perr) then bridge_down = tostring(perr) end
         for kind, names in pairs(pref or {}) do
-            if #names > 0 then
+            if #names > 0 and G_reader_settings then
                 G_reader_settings:saveSetting("nostrum_pick_" .. kind, names)
                 if kind == "calendars" then cfg.calendars = names else cfg.reminder_lists = names end
             end
         end
     end
 
-    -- Agenda par le pont : il ne passe plus par la decouverte CalDAV, mais une
-    -- panne se traite pareil — relance si le wifi s'eveille, sinon on garde
-    -- l'ecran precedent et on dit pourquoi.
-    local by_bridge = agenda_via_bridge(cfg)
+    -- Agenda : le pont d'abord, qui voit tous les calendriers du Mac (iCloud,
+    -- Google, Exchange). Mac eteint et identifiants iCloud fournis : lecture
+    -- directe sur iCloud, sans le Mac. Une panne se traite pareil dans les deux
+    -- cas — relance si le wifi s'eveille, sinon on garde l'ecran precedent.
+    local by_bridge = via_bridge(cfg) and not bridge_down
     local colls, err, b_events, b_cals
     if by_bridge then
         b_events, err, b_cals = Bridge.events(cfg)
         colls = b_events and {}
     else
+        err = bridge_down
+    end
+    -- Secours iCloud : seulement si le pont est hors d'atteinte. Un jeton
+    -- refuse n'est pas une panne, iCloud ne ferait que la masquer.
+    local fallback = via_bridge(cfg) and not colls and is_transport_error(err) and has_icloud(cfg)
+    if not via_bridge(cfg) or fallback then
         colls, err = CalDAV.discover(cfg)
+        by_bridge = false
     end
     if not colls then
         logger.warn("nostrum: agenda (essai " .. attempt .. "):", err)
@@ -886,7 +901,7 @@ function View:fetch(attempt)
         if wifi_is_off() then
             self.status = "WIFI COUPÉ"
             UIManager:show(InfoMessage:new{ text = _("Wi-Fi désactivé sur le Kindle.") })
-        elseif by_bridge then
+        elseif via_bridge(cfg) and not fallback then
             self.status = "PONT INJOIGNABLE"
             UIManager:show(InfoMessage:new{ text = _("Pont Nostrum : ") .. tostring(err) .. "\n\n"
                 .. _("Vérifier que le Mac est allumé, sur le même réseau, et que l'app Nostrum tourne.") })
@@ -918,6 +933,7 @@ function View:fetch(attempt)
     if by_bridge then
         events, seen_cal = b_events, b_cals or {}
     end
+    self.source = by_bridge and "PONT" or "ICLOUD"
 
     for _, coll in ipairs(colls) do
         if coll.events then seen_cal[#seen_cal + 1] = coll.name end
@@ -940,16 +956,21 @@ function View:fetch(attempt)
         end
     end
 
-    local bridge_err
-    if use_bridge then
+    local bridge_err = use_bridge and bridge_down or nil
+    if use_bridge and not bridge_down then
         local list, e, names = Bridge.todos(cfg)
         if list then
             todos = list
             seen_lists = names or seen_lists
         else
             bridge_err = tostring(e)
-            problems[#problems + 1] = bridge_err
         end
+    end
+    -- Mac injoignable : les taches deja affichees restent, plutot qu'un
+    -- ecran vide. Le statut dit qu'elles ne sont plus a jour.
+    if bridge_err then
+        problems[#problems + 1] = bridge_err
+        todos = self.todos or {}
     end
 
     if ok_weather then
@@ -974,9 +995,13 @@ function View:fetch(attempt)
         return (a.due or math.huge) < (b.due or math.huge)
     end)
 
-    table.sort(seen_cal)
-    remember("calendars", seen_cal)
-    remember("lists", seen_lists)
+    -- En secours iCloud, seuls les calendriers iCloud sont vus : le menu garde
+    -- la liste complete apprise du Mac. Pareil pour les listes, invisibles.
+    if not fallback then
+        table.sort(seen_cal)
+        remember("calendars", seen_cal)
+        remember("lists", seen_lists)
+    end
 
     self.events, self.todos, self.last_sync = events, todos, os.time()
     self.status = #problems > 0 and ("PARTIEL (" .. #problems .. " ERR)") or "LIAISON OK"
@@ -985,9 +1010,18 @@ function View:fetch(attempt)
     -- Aucune tâche remontée : distinguer les trois causes, sinon le diagnostic
     -- se fait à l'aveugle. Le nom d'une liste demandée mais absente est la cause
     -- la plus fréquente : iCloud n'expose pas toutes les listes Rappels.
-    if #todos == 0 and use_bridge then
-        self.status = bridge_err and "PONT INJOIGNABLE" or "PONT SANS TÂCHE"
-        logger.warn("nostrum: pont:", bridge_err or "aucune tache ouverte")
+    if fallback then
+        -- Agenda frais (iCloud, voir SOURCE), taches d'avant : le statut le dit.
+        self.status = "MAC ÉTEINT"
+        logger.warn("nostrum: pont injoignable, agenda lu sur iCloud:", bridge_err)
+
+    elseif bridge_err then
+        self.status = "PONT INJOIGNABLE"
+        logger.warn("nostrum: pont:", bridge_err)
+
+    elseif #todos == 0 and use_bridge then
+        self.status = "PONT SANS TÂCHE"
+        logger.warn("nostrum: pont: aucune tache ouverte")
 
     elseif #todos == 0 then
         local exposed = {}

@@ -22,6 +22,7 @@ import AppKit
 import EventKit
 import Foundation
 import Network
+import Security
 
 let appName = "Nostrum"
 let bundleID = "me.davidguia.nostrum"
@@ -150,6 +151,9 @@ struct Settings: Codable {
     var city: String?
     var lat: Double?
     var lon: Double?
+    /// Identifiant Apple du secours iCloud. Le mot de passe, lui, est dans le
+    /// trousseau (ICloudPassword) : ce fichier n'a pas à le porter.
+    var icloudUser: String?
 
     static let file = supportDir.appendingPathComponent("settings.json")
 
@@ -426,6 +430,81 @@ func luaString(_ s: String) -> String {
     return out + "\""
 }
 
+// MARK: - Secours iCloud
+
+/// Mot de passe d'application du secours iCloud, dans le trousseau de session.
+/// Il ne sort de là que pour config.lua, sur la Kindle — qui n'a pas d'autre
+/// moyen de lire l'agenda Mac éteint.
+enum ICloudPassword {
+    private static let service = "\(bundleID).icloud"
+
+    private static func query(_ user: String?) -> [String: Any] {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service]
+        if let user { q[kSecAttrAccount as String] = user }
+        return q
+    }
+
+    static func read(_ user: String) -> String? {
+        var q = query(user)
+        q[kSecReturnData as String] = true
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    @discardableResult
+    static func save(_ user: String, _ password: String) -> Bool {
+        delete()
+        var q = query(user)
+        q[kSecValueData as String] = Data(password.utf8)
+        return SecItemAdd(q as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// Tous les comptes du service : un seul secours à la fois.
+    static func delete() { SecItemDelete(query(nil) as CFDictionary) }
+}
+
+/// Même requête que la Kindle au début de sa découverte CalDAV : si iCloud
+/// l'accepte ici, il l'acceptera là-bas. Rend nil si c'est bon, sinon le
+/// message à afficher. NOSTRUM_CALDAV remplace le serveur pour les essais.
+func verifyICloud(_ user: String, _ password: String, done: @escaping (String?) -> Void) {
+    var req = URLRequest(url: URL(string: ProcessInfo.processInfo.environment["NOSTRUM_CALDAV"]
+        ?? "https://caldav.icloud.com/")!)
+    req.httpMethod = "PROPFIND"
+    req.timeoutInterval = 20
+    req.setValue("0", forHTTPHeaderField: "Depth")
+    req.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+    req.setValue("Basic " + Data("\(user):\(password)".utf8).base64EncodedString(),
+                 forHTTPHeaderField: "Authorization")
+    req.httpBody = Data("""
+        <?xml version="1.0" encoding="utf-8"?>
+        <d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>
+        """.utf8)
+    URLSession.shared.dataTask(with: req) { _, response, error in
+        // Sur un 401, URLSession n'a pas de réponse à rendre : sans délégué pour
+        // répondre au défi d'authentification, il l'annule (-1012). C'est
+        // donc, ici, un refus d'identifiants et non une panne réseau.
+        let refused = (error as? URLError)?.code == .userCancelledAuthentication
+        let code = refused ? 401 : (response as? HTTPURLResponse)?.statusCode ?? 0
+        let message: String?
+        if let error, !refused {
+            message = "iCloud injoignable : \(error.localizedDescription)"
+        } else if code == 207 {
+            message = nil
+        } else if code == 401 || code == 403 {
+            message = """
+                Identifiants refusés par iCloud. Il faut un mot de passe d'application, \
+                pas le mot de passe principal de votre compte Apple.
+                """
+        } else {
+            message = "Réponse inattendue d'iCloud (code \(code))."
+        }
+        DispatchQueue.main.async { done(message) }
+    }.resume()
+}
+
 func kindleConfig(_ s: Settings) -> String {
     let urls = localIPv4().map { luaString("http://\($0):\(s.port)") }.joined(separator: ", ")
     let weather: String
@@ -433,6 +512,19 @@ func kindleConfig(_ s: Settings) -> String {
         weather = "{ enabled = true, name = \(luaString(city.uppercased())), lat = \(lat), lon = \(lon) }"
     } else {
         weather = "{ enabled = false }"
+    }
+    // Secours iCloud : seulement s'il a été vérifié et enregistré dans l'app.
+    var icloud = ""
+    if let user = s.icloudUser, let password = ICloudPassword.read(user) {
+        icloud = """
+
+            -- Secours Mac éteint : l'agenda est lu directement sur iCloud.
+            -- Mot de passe d'application, révocable sur account.apple.com sans
+            -- toucher au compte. Les rappels, eux, demandent toujours le Mac.
+            username = \(luaString(user)),
+            password = \(luaString(password)),
+
+        """
     }
     let date = DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .short)
     return """
@@ -445,7 +537,7 @@ func kindleConfig(_ s: Settings) -> String {
         -- Adresses du Mac à l'installation. Si elles changent, le Kindle
         -- retrouve le Mac seul sur le réseau local.
         bridge_url = { \(urls) },
-
+    \(icloud)
         days = 1,              -- jours d'agenda affichés
         refresh_minutes = 60,  -- resynchro automatique écran ouvert
         tz_offset = 0,         -- correction d'heure en secondes, si décalée
@@ -661,6 +753,9 @@ final class Panel: NSObject, NSApplicationDelegate {
                                   backing: .buffered, defer: false)
     private var boxes: [(NSButton, Prefs.Kind, [String])] = []
     private let city = NSTextField(string: "")
+    private let icloudUser = NSTextField(string: "")
+    private let icloudPassword = NSSecureTextField(string: "")
+    private let icloudState = NSTextField(wrappingLabelWithString: "")
     private let kindleState = NSTextField(labelWithString: "")
     private let installButton = NSButton(title: "Installer sur la Kindle", target: nil, action: nil)
     private let footer = NSTextField(labelWithString: "")
@@ -685,6 +780,14 @@ final class Panel: NSObject, NSApplicationDelegate {
         city.placeholderString = "Ville pour la météo (ex : Dijon) — vide = sans météo"
         city.stringValue = settings.city ?? ""
         city.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        icloudUser.placeholderString = "Identifiant Apple (adresse e-mail)"
+        icloudUser.stringValue = settings.icloudUser ?? ""
+        icloudPassword.placeholderString = "Mot de passe d'application (xxxx-xxxx-xxxx-xxxx)"
+        for f in [icloudUser, icloudPassword] {
+            f.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        }
+        icloudState.font = .systemFont(ofSize: 11)
+        icloudState.preferredMaxLayoutWidth = 520
         footer.font = .systemFont(ofSize: 11)
         footer.textColor = .secondaryLabelColor
         let nc = NSWorkspace.shared.notificationCenter
@@ -756,7 +859,7 @@ final class Panel: NSObject, NSApplicationDelegate {
                 2. Redémarrez KOReader.
                 3. Menu ☰ → Outils → Nostrum → Ouvrir.
 
-                Laissez ce Mac allumé et Nostrum ouvert : c'est lui qui sert l'agenda et les rappels.
+                Laissez ce Mac allumé et Nostrum ouvert : c'est lui qui sert l'agenda et les rappels.\(settings.icloudUser == nil ? "" : "\nMac éteint, l'agenda sera lu directement sur iCloud.")
                 """
             a.addButton(withTitle: "Éjecter la Kindle")
             a.addButton(withTitle: "Plus tard")
@@ -789,6 +892,58 @@ final class Panel: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: Secours iCloud
+
+    private func refreshICloud() {
+        if let user = settings.icloudUser, ICloudPassword.read(user) != nil {
+            icloudState.stringValue = "Enregistré pour \(user). Réinstallez sur la Kindle pour le lui transmettre."
+            icloudState.textColor = .labelColor
+        } else {
+            icloudState.stringValue = "Non configuré : Mac éteint, la Kindle n'affichera plus l'agenda."
+            icloudState.textColor = .secondaryLabelColor
+        }
+    }
+
+    @objc func saveICloud() {
+        let user = icloudUser.stringValue.trimmingCharacters(in: .whitespaces)
+        let password = icloudPassword.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !user.isEmpty, !password.isEmpty else {
+            return alert("Secours iCloud", "Renseignez l'identifiant Apple et le mot de passe d'application.")
+        }
+        icloudState.stringValue = "Vérification auprès d'iCloud…"
+        verifyICloud(user, password) { problem in
+            if let problem {
+                self.refreshICloud()
+                return self.alert("Secours iCloud non enregistré", problem)
+            }
+            guard ICloudPassword.save(user, password) else {
+                self.refreshICloud()
+                return self.alert("Secours iCloud", "Impossible d'enregistrer le mot de passe dans le trousseau.")
+            }
+            settings.icloudUser = user
+            settings.save()
+            self.icloudPassword.stringValue = ""
+            self.refreshICloud()
+            self.alert("Secours iCloud enregistré",
+                       "Rebranchez la Kindle et cliquez « Installer sur la Kindle » pour le lui transmettre.")
+        }
+    }
+
+    @objc func removeICloud() {
+        ICloudPassword.delete()
+        settings.icloudUser = nil
+        settings.save()
+        icloudUser.stringValue = ""
+        icloudPassword.stringValue = ""
+        refreshICloud()
+        alert("Secours iCloud retiré",
+              "Réinstallez sur la Kindle pour l'effacer aussi de son config.lua, puis révoquez le mot de passe d'application sur account.apple.com.")
+    }
+
+    @objc func openAppleAccount() {
+        NSWorkspace.shared.open(URL(string: "https://account.apple.com")!)
+    }
+
     // MARK: Désinstallation
 
     @objc func uninstall() {
@@ -806,6 +961,7 @@ final class Panel: NSObject, NSApplicationDelegate {
         guard a.runModal() == .alertFirstButtonReturn else { return }
         try? FileManager.default.removeItem(at: launchAgent)
         try? FileManager.default.removeItem(at: supportDir)
+        ICloudPassword.delete()
         NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
         NSApp.terminate(nil)
     }
@@ -820,6 +976,7 @@ final class Panel: NSObject, NSApplicationDelegate {
 
     private func note(_ text: String) -> NSTextField {
         let t = NSTextField(wrappingLabelWithString: text)
+        t.preferredMaxLayoutWidth = 520
         t.font = .systemFont(ofSize: 11)
         t.textColor = .secondaryLabelColor
         return t
@@ -835,6 +992,14 @@ final class Panel: NSObject, NSApplicationDelegate {
         let save = NSButton(title: "Enregistrer dans un dossier…", target: self, action: #selector(saveToFolder))
         save.bezelStyle = .rounded
         let buttons = NSStackView(views: [installButton, save])
+
+        // Secours iCloud
+        let verify = NSButton(title: "Vérifier et enregistrer", target: self, action: #selector(saveICloud))
+        let create = NSButton(title: "Créer un mot de passe d'application…", target: self, action: #selector(openAppleAccount))
+        let drop = NSButton(title: "Retirer", target: self, action: #selector(removeICloud))
+        for b in [verify, create, drop] { b.bezelStyle = .rounded }
+        let icloudButtons = NSStackView(views: [verify, create, drop])
+        refreshICloud()
         refreshKindle()
 
         // Sources
@@ -879,6 +1044,10 @@ final class Panel: NSObject, NSApplicationDelegate {
 
         let tout = NSStackView(views: [
             section("Kindle"), city, buttons, kindleState,
+            NSBox.separator(),
+            section("Agenda sans le Mac (facultatif)"),
+            note("Mac éteint, la Kindle peut lire l'agenda iCloud directement. Il faut un mot de passe d'application Apple : compte Apple → Connexion et sécurité → Mots de passe pour les apps. Les rappels demandent toujours le Mac."),
+            icloudUser, icloudPassword, icloudButtons, icloudState,
             NSBox.separator(),
             section("Sources affichées"), colonnes,
             note("Coché = affiché sur le Kindle. Tout décocher revient à tout afficher."),

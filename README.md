@@ -60,9 +60,14 @@ chaque version.
 - **Lien de téléchargement client** :
   https://github.com/david-guia/nostrum-releases/raw/main/Nostrum.dmg
 
-Mode avancé : `username` / `password` (mot de passe d'application iCloud) dans
-`config.lua` remettent l'agenda en CalDAV direct ; il reste alors lisible Mac
-éteint. Voir `config.lua.sample`.
+**Secours iCloud (facultatif)** : dans l'app Mac, section *Agenda sans le Mac*,
+identifiant Apple + mot de passe d'application. L'app les vérifie auprès
+d'iCloud (`PROPFIND`, même requête que la Kindle), garde le mot de passe dans le
+trousseau et l'écrit dans `config.lua` à l'installation (`username` /
+`password`). La Kindle interroge toujours le pont d'abord ; s'il est hors
+d'atteinte (une seule tentative par synchro), elle lit l'agenda sur iCloud en
+CalDAV, garde les tâches déjà affichées et affiche `MAC ÉTEINT`, source
+`ICLOUD`. Le menu garde la liste des calendriers apprise du Mac.
 
 ## Contrôles
 

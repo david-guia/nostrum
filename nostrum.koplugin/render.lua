@@ -496,6 +496,46 @@ assert(synchro.status == "PONT INJOIGNABLE", "statut attendu PONT INJOIGNABLE : 
 assert(#synchro.events == 1, "l'agenda precedent doit rester affiche")
 while derouler() > 0 do end
 
+-- Identifiants iCloud fournis depuis l'app Mac : secours seulement. Mac
+-- allume, le pont sert l'agenda (il voit aussi Google, Exchange…).
+local secours = Nostrum.View:new{ cfg = { bridge_token = "t", username = "moi@icloud.com",
+                                          password = "abcd-efgh-ijkl-mnop", weather = {} } }
+Pont.events = function() return { { uid = "p", summary = "Vu par le Mac", start = os.time() + 60 } }, nil, { "Perso" } end
+secours:fetch(1)
+assert(secours.status == "LIAISON OK" and secours.source == "PONT",
+    "Mac allume : l'agenda doit venir du pont, pas d'iCloud")
+assert(secours.events[1].summary == "Vu par le Mac")
+assert(#secours.todos == 1, "taches du pont attendues")
+
+-- Mac eteint : agenda lu sur iCloud, taches d'avant conservees, et le pont
+-- n'est sollicite qu'une fois (prefs) — chaque essai coute un delai.
+local appels_pont = 0
+Pont.prefs = function() appels_pont = appels_pont + 1; return nil, "reseau: timeout" end
+Pont.events = function() error("pont redemande alors qu'il vient d'echouer") end
+Pont.todos = function() error("pont redemande alors qu'il vient d'echouer") end
+CalDAVStub.discover = function() return { { name = "Perso", events = true } } end
+CalDAVStub.events = function()
+    return { { uid = "i", summary = "Lu sur iCloud", start = os.time() + 120 } }
+end
+secours:fetch(1)
+assert(appels_pont == 1, "le pont ne doit etre essaye qu'une fois par synchro")
+assert(secours.status == "MAC ÉTEINT", "statut attendu MAC ÉTEINT : " .. tostring(secours.status))
+assert(secours.source == "ICLOUD", "la source affichee doit etre ICLOUD")
+assert(secours.events[1].summary == "Lu sur iCloud", "agenda iCloud non affiche")
+assert(#secours.todos == 1 and secours.todos[1].summary == "Pain", "les taches d'avant doivent rester")
+assert(reglages["nostrum_seen_calendars"][1] == "Perso", "le menu doit garder les calendriers du Mac")
+
+-- La resynchro horaire programmee par `secours` ne doit pas tourner sous les
+-- doublures du cas suivant : on oublie les differes en attente.
+differes = {}
+
+-- Mac eteint sans identifiants : comportement d'avant, rien de lu sur iCloud.
+CalDAVStub.discover = function() error("CalDAV appele sans identifiants") end
+synchro:fetch(3)
+assert(synchro.status == "PONT INJOIGNABLE", "sans identifiants : " .. tostring(synchro.status))
+while derouler() > 0 do end
+Pont.prefs = function() return { calendars = {}, lists = {} } end
+
 -- Mise a jour proposee : le Kindle suit la version du Mac. Rien ne s'installe
 -- sans accord, et la question n'est posee qu'une fois par version.
 local UI = package.loaded["ui/uimanager"]
