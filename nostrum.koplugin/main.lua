@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.3"
+local VERSION = "1.3.1"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -153,6 +153,21 @@ end
 -- l'application Mac a l'installation. Les identifiants iCloud deviennent alors
 -- facultatifs ; renseignes (depuis l'app Mac), ils servent de secours : Mac
 -- eteint, l'agenda est lu directement sur iCloud.
+-- Le systeme d'Amazon peint sa barre d'etat (heure, batterie, wifi) par-dessus
+-- KOReader, et la recharge a la veille, au reveil et a chaque minute : elle
+-- recouvrait le bandeau de Nostrum. On la retire a chacune de ces occasions —
+-- les memes commandes que KOReader au demarrage et que l'ancien patch, qui ne
+-- les passait qu'une fois. Les modules de veille et de pub d'Amazon partent
+-- aussi : rien ne doit peindre par-dessus pendant la veille. En arriere-plan,
+-- pour ne jamais figer l'ecran ; sans effet hors Kindle.
+local function hide_kindle_chrome()
+    if not (Device.isKindle and Device:isKindle()) then return end
+    os.execute("(lipc-set-prop com.lab126.pillow disableEnablePillow disable;"
+        .. " lipc-set-prop com.lab126.blanket unload chrome;"
+        .. " lipc-set-prop com.lab126.blanket unload ad_screensaver;"
+        .. " lipc-set-prop com.lab126.blanket unload screensaver) >/dev/null 2>&1 &")
+end
+
 local function via_bridge(cfg) return ok_bridge and cfg.bridge_token ~= nil end
 local function has_icloud(cfg) return cfg.username ~= nil and cfg.password ~= nil end
 
@@ -1076,10 +1091,13 @@ end
 function View:start_clock()
     if self.clock_tick then UIManager:unschedule(self.clock_tick) end
     self.clock_tick = function()
+        hide_kindle_chrome()
         if self.clock_zone then UIManager:setDirty(self, "ui", self.clock_zone) end
         self:start_clock()
     end
-    UIManager:scheduleIn(math.max(1, 60 - tonumber(os.date("%S"))), self.clock_tick)
+    -- 2 s apres le changement de minute : si l'horloge d'Amazon se repeint
+    -- malgre tout, la notre passe par-dessus juste apres.
+    UIManager:scheduleIn(60 - tonumber(os.date("%S")) + 2, self.clock_tick)
 end
 
 function View:schedule()
@@ -1096,11 +1114,18 @@ end
 -- les reglages « restaurer le wifi au reveil » de l'appareil.
 -- Pas de valeur de retour : l'evenement est diffuse a toute la pile.
 function View:onResume()
+    hide_kindle_chrome()
     -- Le minuteur de l'horloge s'est fige lui aussi : on le recale.
     self:start_clock()
     -- Deux appuis sur le bouton veille ne doivent pas synchroniser deux fois.
     if self.last_sync and os.time() - self.last_sync < 60 then return end
     self:sync()
+end
+
+-- Avant que l'ecran de veille ne s'affiche : la barre d'Amazon ne doit pas
+-- venir s'y peindre.
+function View:onSuspend()
+    hide_kindle_chrome()
 end
 
 function View:onClose()
@@ -1434,6 +1459,7 @@ function Nostrum:open()
         cfg = cfg,
         light = G_reader_settings and G_reader_settings:isTrue("nostrum_light") or false,
     }
+    hide_kindle_chrome()
     UIManager:show(view)
     view:start_clock()
     view:sync()

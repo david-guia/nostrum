@@ -333,8 +333,8 @@ assert(horloge.clock_zone and horloge.clock_zone.y > 0 and horloge.clock_zone.h 
 assert(horloge.clock_zone.y + horloge.clock_zone.h < view.rows[1].top,
     "la zone de l'horloge ne doit pas couvrir la liste des taches")
 horloge:start_clock()
-local attendu = 60 - tonumber(os.date("%S"))
-assert(dernier_delai >= 1 and dernier_delai <= 60 and math.abs(dernier_delai - attendu) <= 1,
+local attendu = 60 - tonumber(os.date("%S")) + 2
+assert(dernier_delai >= 2 and dernier_delai <= 62 and math.abs(dernier_delai - attendu) <= 1,
     "le minuteur doit viser le prochain changement de minute : " .. tostring(dernier_delai))
 peints = {}
 assert(derouler() == 1, "un seul minuteur d'horloge attendu")
@@ -347,6 +347,29 @@ horloge:onResume()
 assert(#differes == 1, "le reveil ne doit pas doubler le minuteur")
 horloge:stopTimers()
 assert(#differes == 0, "fermer l'ecran doit arreter l'horloge")
+
+-- Barre d'etat d'Amazon : retiree a la veille, au reveil et a chaque minute,
+-- seulement sur Kindle, et sans attendre (commande en arriere-plan).
+local commandes = {}
+local vrai_execute = os.execute
+os.execute = function(c) commandes[#commandes + 1] = c; return true end
+horloge:onSuspend()
+assert(#commandes == 0, "hors Kindle : aucune commande lipc")
+Device.isKindle = function() return true end
+horloge:onSuspend()
+horloge:onResume()
+horloge:start_clock()
+derouler()
+horloge:stopTimers()
+differes = {}
+assert(#commandes == 3, "barre d'Amazon : attendue a la veille, au reveil et a la minute, obtenu " .. #commandes)
+for _, c in ipairs(commandes) do
+    assert(c:find("disableEnablePillow disable", 1, true) and c:find("unload chrome", 1, true),
+        "commande de masquage incomplete : " .. c)
+    assert(c:match("&%s*$"), "la commande doit tourner en arriere-plan : " .. c)
+end
+Device.isKindle = nil
+os.execute = vrai_execute
 
 -- Choix des sources depuis le Kindle. « Rien de coche » veut dire « tout
 -- afficher » : c'est la convention de config.lua, et un menu qui la trahirait
