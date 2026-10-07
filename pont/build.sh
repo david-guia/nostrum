@@ -40,8 +40,11 @@ rm -rf "$DIST"
 mkdir -p "$DIST" "$APP/Contents/MacOS" "$APP/Contents/Resources/nostrum.koplugin"
 
 echo "2/6  compilation arm64 + x86_64"
+# Compile une copie : Documents est synchronise par iCloud, qui peut toucher le
+# fichier pendant la compilation (« input file was modified during the build »).
+cp -X nostrum-pont.swift "$BUILD/"
 for arch in arm64 x86_64; do
-    swiftc -O -target "$arch-apple-macos12.0" -o "$BUILD/nostrum-$arch" nostrum-pont.swift
+    swiftc -O -target "$arch-apple-macos12.0" -o "$BUILD/nostrum-$arch" "$BUILD/nostrum-pont.swift"
 done
 lipo -create "$BUILD/nostrum-arm64" "$BUILD/nostrum-x86_64" -output "$APP/Contents/MacOS/Nostrum"
 
