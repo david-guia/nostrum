@@ -156,7 +156,9 @@ assert(Nostrum.sky_kind(nil) == nil and Nostrum.sky_kind(200) == nil,
 -- pour une fin le lendemain tromperait plus que l'absence d'heure.
 -- Convention de numerotation : entier pour un gros changement, decimale pour un
 -- mineur. Un « 2.1.3 » glisse vite, la ligne du bandeau est calee sur ce format.
-assert(Nostrum.VERSION:match("^%d+%.%d+$"), "version attendue au format N.N")
+-- MAJEUR.FONCTION.CORRECTIF ; « 1.3 » d'avant la regle reste accepte.
+assert(Nostrum.VERSION:match("^%d+%.%d+$") or Nostrum.VERSION:match("^%d+%.%d+%.%d+$"),
+    "version attendue au format X.Y.Z")
 
 local sl = Nostrum.slot
 assert(sl({ allday = true, start = day_start }) == "JOUR", "journee entiere")

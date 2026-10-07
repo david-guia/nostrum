@@ -10,8 +10,11 @@
 # plus anciennes, proposent de télécharger le DMG. Une fois le Mac à jour,
 # chaque Kindle propose à son tour d'installer la version du Mac.
 #
-# Pour une nouvelle version : changer `local VERSION` (format N.N), committer,
+# Pour une nouvelle version : changer `local VERSION`, committer,
 # lancer ce script. Il pousse aussi les sources et crée la Release du dépôt des sources.
+#
+# Numérotation X.Y.Z : correction de bug → Z+1 (1.3.1), nouvelle fonctionnalité
+# → Y+1 et Z à 0 (1.4.0), changement majeur → X+1 (2.0.0).
 
 set -e
 cd "$(dirname "$0")"

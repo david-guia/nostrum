@@ -22,6 +22,8 @@ puis `dist/Nostrum-<version>.dmg` (application + raccourci Applications +
 
 La version est celle de `local VERSION` en tête de `nostrum.koplugin/main.lua` :
 un seul endroit, repris par le bandeau du Kindle, l'`Info.plist` et le nom du DMG.
+Numérotation X.Y.Z : correction de bug → `1.3.1`, nouvelle fonctionnalité →
+`1.4.0`, changement majeur → `2.0.0`.
 
 **Sans compte Apple Developer** : l'application est signée avec le certificat
 gratuit « Apple Development » mais n'est pas notarisée ; Gatekeeper bloque le
@@ -49,7 +51,7 @@ chaque version.
   présente le jeton aux hôtes ouverts ; l'adresse trouvée est mémorisée. Au plus
   un balayage toutes les 5 minutes.
 - **Mises à jour** : rien ne s'installe seul. Pour publier : changer
-  `local VERSION` dans `main.lua` (format N.N), committer, puis
+  `local VERSION` dans `main.lua`, committer, puis
   `pont/publier.sh`, qui construit et signe sur ce Mac et pousse dans le dépôt
   public `david-guia/nostrum-releases` le DMG et `latest.json` (la version
   officielle). L'app Mac lit ce fichier à l'ouverture puis toutes les 6 h ; si
