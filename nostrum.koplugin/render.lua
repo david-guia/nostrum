@@ -551,7 +551,8 @@ Pont.events = function() return nil, "reseau: timeout" end
 synchro:fetch(3)
 assert(synchro.status == "PONT INJOIGNABLE", "statut attendu PONT INJOIGNABLE : " .. synchro.status)
 assert(#synchro.events == 1, "l'agenda precedent doit rester affiche")
-while derouler() > 0 do end
+-- La resynchro reprogrammee apres l'echec echouerait de meme, sans fin.
+differes = {}
 
 -- Identifiants iCloud fournis depuis l'app Mac : secours seulement. Mac
 -- allume, le pont sert l'agenda (il voit aussi Google, Exchange…).
@@ -588,8 +589,19 @@ differes = {}
 
 -- Mac eteint sans identifiants : comportement d'avant, rien de lu sur iCloud.
 CalDAVStub.discover = function() error("CalDAV appele sans identifiants") end
+-- La meteo ne depend pas du Mac : elle doit se mettre a jour quand meme.
+package.loaded["nostrum_weather"].fetch = function() return { place = "DIJON", temp = 7, label = "pluie" } end
+synchro.source = "PONT"
+synchro.weather = nil
+differes = {}
 synchro:fetch(3)
 assert(synchro.status == "PONT INJOIGNABLE", "sans identifiants : " .. tostring(synchro.status))
+assert(synchro.weather and synchro.weather.temp == 7, "la meteo doit se mettre a jour meme sans agenda")
+assert(synchro.source == "AUCUNE", "SOURCE ne doit plus afficher PONT : " .. tostring(synchro.source))
+assert(#differes >= 1, "une resynchro doit rester programmee apres un echec")
+-- Elle echouerait et se reprogrammerait sans fin sous ces doublures.
+differes = {}
+package.loaded["nostrum_weather"].fetch = function() return nil end
 while derouler() > 0 do end
 Pont.prefs = function() return { calendars = {}, lists = {} } end
 

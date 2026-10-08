@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.3.1"
+local VERSION = "1.3.2"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -920,8 +920,12 @@ function View:fetch(attempt)
             UIManager:show(InfoMessage:new{ text = _("Wi-Fi désactivé sur le Kindle.") })
         elseif via_bridge(cfg) and not fallback then
             self.status = "PONT INJOIGNABLE"
+            -- Sans identifiants iCloud, rien d'autre ne peut fournir l'agenda :
+            -- le dire, et dire comment l'eviter la prochaine fois.
+            local hint = has_icloud(cfg) and ""
+                or "\n\n" .. _("Pour garder l'agenda Mac éteint : app Nostrum du Mac → « Agenda sans le Mac », puis réinstaller sur la Kindle.")
             UIManager:show(InfoMessage:new{ text = _("Pont Nostrum : ") .. tostring(err) .. "\n\n"
-                .. _("Vérifier que le Mac est allumé, sur le même réseau, et que l'app Nostrum tourne.") })
+                .. _("Vérifier que le Mac est allumé, sur le même réseau, et que l'app Nostrum tourne.") .. hint })
         else
             self.status = "LIAISON ROMPUE"
             local dump = dump_trace()
@@ -929,7 +933,17 @@ function View:fetch(attempt)
             if dump then msg = msg .. "\n\n" .. _("Trace brute ecrite dans :") .. "\n" .. dump end
             UIManager:show(InfoMessage:new{ text = msg })
         end
+        -- Aucune source d'agenda n'a repondu : le cadre SOURCE ne doit plus
+        -- afficher celle de la derniere synchro reussie.
+        self.source = "AUCUNE"
+        -- La meteo ne depend ni du Mac ni d'iCloud : elle se met a jour quand
+        -- meme. Sortir avant elle la figeait avec l'agenda.
+        if ok_weather and not wifi_is_off() then
+            local w = Weather.fetch(cfg)
+            if w then self.weather = w end
+        end
         self:redraw("full")
+        self:schedule()
         return
     end
 
