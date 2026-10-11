@@ -23,6 +23,7 @@ import EventKit
 import Foundation
 import Network
 import Security
+import SystemConfiguration
 import UniformTypeIdentifiers
 
 let appName = "Nostrum"
@@ -393,22 +394,38 @@ final class Peer {
 
 // MARK: - Adresses locales
 
-func localIPv4() -> [String] {
-    var out: [String] = []
+func localIPv4() -> [String] { localAddresses().map(\.ip) }
+
+/// Type de connexion d'une interface (« en0 »…), demandé à macOS : le nom ne
+/// suffit pas, en0 est le Wi-Fi d'un MacBook mais l'Ethernet d'un Mac mini.
+func connectionKind(_ bsd: String) -> String {
+    let all = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface] ?? []
+    guard let i = all.first(where: { SCNetworkInterfaceGetBSDName($0) as String? == bsd }),
+          let type = SCNetworkInterfaceGetInterfaceType(i)
+    else { return "Réseau" }
+    if type == kSCNetworkInterfaceTypeIEEE80211 { return "Wi-Fi" }
+    if type == kSCNetworkInterfaceTypeEthernet { return "Ethernet" }
+    return "Réseau"
+}
+
+/// Adresses IPv4 du Mac, avec l'interface qui porte chacune.
+func localAddresses() -> [(ip: String, interface: String)] {
+    var out: [(ip: String, interface: String)] = []
     var head: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&head) == 0, let first = head else { return out }
     defer { freeifaddrs(head) }
 
     for i in sequence(first: first, next: { $0.pointee.ifa_next }) {
         guard let addr = i.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
-        guard String(cString: i.pointee.ifa_name).hasPrefix("en") else { continue }
+        let name = String(cString: i.pointee.ifa_name)
+        guard name.hasPrefix("en") else { continue }
 
         var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         if getnameinfo(addr, socklen_t(addr.pointee.sa_len),
                        &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
             let ip = String(cString: host)
             // 169.254.x.x = pas de bail DHCP, inutilisable par le Kindle.
-            if !ip.hasPrefix("169.254") { out.append(ip) }
+            if !ip.hasPrefix("169.254") { out.append((ip, name)) }
         }
     }
     return out
@@ -1381,7 +1398,6 @@ final class Panel: NSObject, NSApplicationDelegate {
     }
 
     private func systemTab() -> NSView {
-        let ips = localIPv4()
         // Libellé et valeur posés sur la même ligne de base, comme la grille
         // du Kindle : centrés, deux tailles de police se décalent.
         func line(_ key: String, _ value: String) -> NSView {
@@ -1391,10 +1407,25 @@ final class Panel: NSObject, NSApplicationDelegate {
             r.alignment = .firstBaseline
             return r
         }
+        // Une adresse par ligne, avec sa connexion : le Mac en a une par
+        // interface (câble, Wi-Fi), et le Kindle bascule de l'une à l'autre.
+        func addresses() -> NSView {
+            let found = localAddresses()
+            if found.isEmpty { return line("Adresses", "Aucun réseau local") }
+            return Console.column(found.enumerated().map { n, a in
+                let k = Console.label(n == 0 ? "Adresses" : "")
+                k.widthAnchor.constraint(equalToConstant: 150).isActive = true
+                let v = NSTextField(labelWithAttributedString: Console.caps("\(a.ip):\(settings.port)", size: 12, bold: true))
+                v.widthAnchor.constraint(equalToConstant: 210).isActive = true
+                let r = Console.row([k, v, Console.label(connectionKind(a.interface))])
+                r.alignment = .firstBaseline
+                return r
+            }, spacing: 6)
+        }
         let remove = ConsoleButton("Désinstaller…", target: self, action: #selector(uninstall))
         return Console.column([
             FrameView("État du pont", Console.column([
-                line("Adresses", ips.isEmpty ? "Aucun réseau local" : ips.map { "\($0):\(settings.port)" }.joined(separator: "  ")),
+                addresses(),
                 line("Version", plugin.version()),
                 line("Mise à jour", available.map { "\($0.version) disponible" } ?? "À jour"),
             ], spacing: 9)),
