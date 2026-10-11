@@ -953,6 +953,27 @@ final class ConsoleButton: NSButton {
     }
 }
 
+/// Lien hypertexte : texte simple souligné, curseur « main », ouvre son URL
+/// (page web ou mailto:). Un libellé cliquable plutôt qu'un bouton : il a la
+/// même marge que les autres textes, donc s'aligne sur eux ; et pas le champ à
+/// liens du système, qui imposerait son bleu.
+final class LinkButton: NSTextField {
+    private var url: URL?
+
+    convenience init(_ text: String, url: URL) {
+        self.init(labelWithAttributedString: NSAttributedString(string: text, attributes: [
+            .font: Console.font(12), .foregroundColor: Console.ink,
+            .underlineStyle: NSUnderlineStyle.single.rawValue]))
+        self.url = url
+        toolTip = url.absoluteString
+        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(open)))
+    }
+
+    @objc private func open() { if let url { NSWorkspace.shared.open(url) } }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}
+
 /// Case à cocher façon terminal : [■] coché, [ ] non coché.
 final class ConsoleCheck: NSButton {
     let name: String
@@ -1437,27 +1458,27 @@ final class Panel: NSObject, NSApplicationDelegate {
     }
 
     private func aboutTab() -> NSView {
-        // `exact` : valeur affichée telle quelle — une adresse web se tape en
-        // minuscules, les capitales la rendraient fausse.
-        func line(_ key: String, _ value: String, exact: Bool = false) -> NSView {
+        func line(_ key: String, _ value: NSView) -> NSView {
             let k = Console.label(key)
             k.widthAnchor.constraint(equalToConstant: 150).isActive = true
-            let v = exact
-                ? NSAttributedString(string: value, attributes: [.font: Console.font(12, bold: true), .foregroundColor: Console.ink])
-                : Console.caps(value, size: 12, bold: true)
-            let r = Console.row([k, NSTextField(labelWithAttributedString: v)])
+            let r = Console.row([k, value])
             r.alignment = .firstBaseline
             return r
         }
-        let repo = ConsoleButton("Voir le code source", target: self, action: #selector(openRepository), primary: true)
+        func text(_ value: String) -> NSView {
+            NSTextField(labelWithAttributedString: Console.caps(value, size: 12, bold: true))
+        }
+        let profile = ConsoleButton("Profil GitHub", target: self, action: #selector(openProfile), primary: true)
         return Console.column([
             FrameView("À propos", Console.column([
                 NSTextField(labelWithAttributedString: Console.caps("L'ordinateur de bord de votre journée", size: 12, bold: true)),
-                line("Conçu par", "David"),
-                line("Version", plugin.version()),
-                line("Licence", "MIT — libre"),
-                line("Code source", "github.com/david-guia/nostrum", exact: true),
-                repo,
+                line("Conçu par", text("David")),
+                line("Contact", LinkButton("hello@davidguia.me", url: URL(string: "mailto:hello@davidguia.me")!)),
+                line("Version", text(plugin.version())),
+                line("Licence", text("MIT — libre")),
+                line("Code source", LinkButton("github.com/david-guia/nostrum",
+                                               url: URL(string: "https://github.com/david-guia/nostrum")!)),
+                profile,
             ], spacing: 12)),
             FrameView("Vos données", Console.column([
                 Console.note("Agenda et rappels passent du Mac au Kindle sur votre réseau local, protégés par un jeton propre à cette installation : aucun compte, aucun serveur intermédiaire. Seules sorties vers Internet : la météo (Open-Meteo), la vérification des mises à jour (GitHub) et, si vous l'activez, le secours iCloud."),
@@ -1465,8 +1486,8 @@ final class Panel: NSObject, NSApplicationDelegate {
         ], spacing: 16, fill: true)
     }
 
-    @objc func openRepository() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/david-guia/nostrum")!)
+    @objc func openProfile() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/david-guia")!)
     }
 
     /// Reconstruite à chaque ouverture : un calendrier ajouté côté iCloud doit
