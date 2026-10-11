@@ -829,22 +829,40 @@ enum Console {
         return t
     }
 
-    /// Champ de saisie : un puits sombre cerné d'un trait, sans bezel système.
-    static func style(_ f: NSTextField, placeholder: String, width: CGFloat = 440) {
+    /// Champ de saisie : un puits sombre cerné d'un trait. Le champ natif ne
+    /// sait pas se donner de marge intérieure : il est posé, sans bordure, dans
+    /// un cadre qui lui en donne une, et centré verticalement.
+    static func boxed(_ f: NSTextField, placeholder: String, width: CGFloat = 440) -> NSView {
         f.font = font(13)
         f.textColor = ink
-        f.drawsBackground = true
-        f.backgroundColor = well
+        f.drawsBackground = false
         f.isBezeled = false
         f.isBordered = false
         f.focusRingType = .none
-        f.wantsLayer = true
-        f.layer?.borderColor = dim.cgColor
-        f.layer?.borderWidth = 1
+        f.usesSingleLineMode = true
+        f.cell?.isScrollable = true
         f.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
-            .font: font(12), .foregroundColor: faint])
-        f.widthAnchor.constraint(equalToConstant: width).isActive = true
-        f.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            .font: font(13), .foregroundColor: faint])
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.backgroundColor = well.cgColor
+        box.layer?.borderColor = dim.cgColor
+        box.layer?.borderWidth = 1
+        f.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(f)
+        NSLayoutConstraint.activate([
+            box.widthAnchor.constraint(equalToConstant: width),
+            box.heightAnchor.constraint(equalToConstant: 30),
+            f.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
+            f.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
+            f.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+        ])
+        return box
+    }
+
+    /// Libellé collé à son champ : la paire se lit comme un seul bloc.
+    static func field(_ title: String, _ box: NSView) -> NSStackView {
+        column([label(title), box], spacing: 6)
     }
 
     static func row(_ views: [NSView], spacing: CGFloat = 10) -> NSStackView {
@@ -855,11 +873,18 @@ enum Console {
         return r
     }
 
-    static func column(_ views: [NSView], spacing: CGFloat = 10) -> NSStackView {
+    /// `fill` : les cadres prennent toute la largeur de la colonne, pour que
+    /// tous les onglets s'arrêtent au même bord.
+    static func column(_ views: [NSView], spacing: CGFloat = 10, fill: Bool = false) -> NSStackView {
         let c = NSStackView(views: views)
         c.orientation = .vertical
         c.alignment = .leading
         c.spacing = spacing
+        if fill {
+            for v in views where v is FrameView || v is NSStackView {
+                v.widthAnchor.constraint(equalTo: c.widthAnchor).isActive = true
+            }
+        }
         return c
     }
 }
@@ -1031,7 +1056,9 @@ final class Panel: NSObject, NSApplicationDelegate {
     private let screensaverPreview = NSImageView()
     private let kindleState = NSTextField(labelWithString: "")
     private let installButton = ConsoleButton("Installer sur la Kindle", target: nil, action: nil, primary: true)
-    private let footer = NSTextField(labelWithString: "")
+    private var cityBox = NSView()
+    private var userBox = NSView()
+    private var passwordBox = NSView()
     private let updateButton = ConsoleButton("", target: nil, action: nil, primary: true)
     private let band = BandView()
     private let tabHost = NSView()
@@ -1061,11 +1088,11 @@ final class Panel: NSObject, NSApplicationDelegate {
         installButton.target = self
         installButton.action = #selector(installOnKindle)
         installButton.keyEquivalent = "\r"
-        Console.style(city, placeholder: "Dijon — vide = sans météo")
+        cityBox = Console.boxed(city, placeholder: "Dijon — vide = sans météo")
         city.stringValue = settings.city ?? ""
-        Console.style(icloudUser, placeholder: "adresse@icloud.com")
+        userBox = Console.boxed(icloudUser, placeholder: "adresse@icloud.com")
         icloudUser.stringValue = settings.icloudUser ?? ""
-        Console.style(icloudPassword, placeholder: "xxxx-xxxx-xxxx-xxxx")
+        passwordBox = Console.boxed(icloudPassword, placeholder: "xxxx-xxxx-xxxx-xxxx")
         icloudState.font = Console.font(11)
         icloudState.preferredMaxLayoutWidth = 560
         updateButton.target = self
@@ -1300,20 +1327,19 @@ final class Panel: NSObject, NSApplicationDelegate {
         return Console.column([
             colonnes,
             Console.note("[■] = affiché sur le Kindle. Tout décocher revient à tout afficher."),
-        ], spacing: 12)
+        ], spacing: 12, fill: true)
     }
 
     private func kindleTab() -> NSView {
         let save = ConsoleButton("Enregistrer dans un dossier…", target: self, action: #selector(saveToFolder))
         return Console.column([
             FrameView("Installation", Console.column([
-                Console.label("Ville pour la météo"),
-                city,
-                Console.row([installButton, save]),
                 kindleState,
-            ], spacing: 12)),
-            Console.note("Branchez la Kindle en USB, KOReader déjà installé. Pour une Kindle qui ne s'ouvre pas comme un disque, « Enregistrer dans un dossier » prépare le plugin à copier dans koreader/plugins/."),
-        ], spacing: 12)
+                Console.field("Ville pour la météo", cityBox),
+                Console.row([installButton, save]),
+                Console.note("Kindle qui ne s'ouvre pas comme un disque : « Enregistrer dans un dossier », puis copier ce dossier dans koreader/plugins/."),
+            ], spacing: 16)),
+        ], fill: true)
     }
 
     private func icloudTab() -> NSView {
@@ -1324,14 +1350,12 @@ final class Panel: NSObject, NSApplicationDelegate {
         return Console.column([
             FrameView("Agenda sans le Mac", Console.column([
                 Console.note("Mac éteint, la Kindle peut lire l'agenda iCloud directement. Il faut un mot de passe d'application Apple : compte Apple → Connexion et sécurité → Mots de passe pour les apps. Les rappels demandent toujours le Mac."),
-                Console.label("Identifiant Apple"),
-                icloudUser,
-                Console.label("Mot de passe d'application"),
-                icloudPassword,
+                Console.field("Identifiant Apple", userBox),
+                Console.field("Mot de passe d'application", passwordBox),
                 Console.row([verify, create, drop]),
                 icloudState,
-            ], spacing: 10)),
-        ])
+            ], spacing: 16)),
+        ], fill: true)
     }
 
     private func veilleTab() -> NSView {
@@ -1353,20 +1377,23 @@ final class Panel: NSObject, NSApplicationDelegate {
         ], spacing: 14)
         let row = Console.row([screensaverPreview, col], spacing: 18)
         row.alignment = .top
-        return Console.column([FrameView("Écran de veille", row)])
+        return Console.column([FrameView("Écran de veille", row)], fill: true)
     }
 
     private func systemTab() -> NSView {
         let ips = localIPv4()
+        // Libellé et valeur posés sur la même ligne de base, comme la grille
+        // du Kindle : centrés, deux tailles de police se décalent.
         func line(_ key: String, _ value: String) -> NSView {
             let k = Console.label(key)
-            k.widthAnchor.constraint(equalToConstant: 170).isActive = true
-            return Console.row([k, NSTextField(labelWithAttributedString: Console.caps(value, size: 12, bold: true))])
+            k.widthAnchor.constraint(equalToConstant: 150).isActive = true
+            let r = Console.row([k, NSTextField(labelWithAttributedString: Console.caps(value, size: 12, bold: true))])
+            r.alignment = .firstBaseline
+            return r
         }
         let remove = ConsoleButton("Désinstaller…", target: self, action: #selector(uninstall))
         return Console.column([
             FrameView("État du pont", Console.column([
-                line("Pont", listening ? "Actif" : "Démarrage…"),
                 line("Adresses", ips.isEmpty ? "Aucun réseau local" : ips.map { "\($0):\(settings.port)" }.joined(separator: "  ")),
                 line("Version", plugin.version()),
                 line("Mise à jour", available.map { "\($0.version) disponible" } ?? "À jour"),
@@ -1375,7 +1402,7 @@ final class Panel: NSObject, NSApplicationDelegate {
                 Console.note("Supprime le lancement à l'ouverture de session et les réglages de ce Mac. Vos rappels et votre agenda ne sont pas touchés."),
                 remove,
             ], spacing: 12)),
-        ], spacing: 16)
+        ], spacing: 16, fill: true)
     }
 
     /// Reconstruite à chaque ouverture : un calendrier ajouté côté iCloud doit
@@ -1395,8 +1422,7 @@ final class Panel: NSObject, NSApplicationDelegate {
         let root = RootView()
         for v in [band, tabHost] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
         let tabs = Console.row(tabButtons, spacing: 8)
-        footer.translatesAutoresizingMaskIntoConstraints = false
-        let bas = Console.row([footer, updateButton])
+        let bas = Console.row([updateButton])
         for v in [band, tabs, tabHost, bas] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
@@ -1445,13 +1471,10 @@ final class Panel: NSObject, NSApplicationDelegate {
     @objc private func selectTab(_ sender: NSButton) { showTab(sender.tag) }
 
     func refreshFooter() {
+        // L'état du pont tient dans le bandeau ; adresses et version sont dans
+        // l'onglet Système. Le pied ne porte que la mise à jour, s'il y en a une.
         updateButton.isHidden = available == nil
         updateButton.setLabel(available.map { "Télécharger la version \($0.version)" } ?? "")
-        let ips = localIPv4()
-        let text = !listening ? "Pont · démarrage…"
-            : ips.isEmpty ? "Pont actif · aucun réseau local"
-            : "Pont actif · \(ips.map { "\($0):\(settings.port)" }.joined(separator: "  ")) · v\(plugin.version())"
-        footer.attributedStringValue = Console.caps(text, size: 10, color: Console.dim)
         band.status = !listening ? "Démarrage" : "Pont actif"
     }
 
