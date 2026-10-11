@@ -794,6 +794,228 @@ listener.newConnectionHandler = { conn in
 
 // MARK: - Fenêtre
 
+// MARK: - Style console
+
+/// Le langage de l'écran Kindle : fond noir, encre blanche, gris pour le
+/// secondaire, chasse fixe en capitales espacées, cadres à titre inversé.
+enum Console {
+    static let ink = NSColor.white
+    static let dim = NSColor(white: 0.66, alpha: 1)
+    static let faint = NSColor(white: 0.36, alpha: 1)
+    static let back = NSColor.black
+    static let well = NSColor(white: 0.09, alpha: 1)
+
+    static func font(_ size: CGFloat, bold: Bool = false) -> NSFont {
+        .monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
+    }
+
+    /// Capitales espacées, comme les libellés du Kindle.
+    static func caps(_ text: String, size: CGFloat = 11, color: NSColor = ink,
+                     bold: Bool = false, kern: CGFloat = 1.6) -> NSAttributedString {
+        NSAttributedString(string: text.uppercased(), attributes: [
+            .font: font(size, bold: bold), .foregroundColor: color, .kern: kern])
+    }
+
+    static func label(_ text: String, size: CGFloat = 10, color: NSColor = dim, bold: Bool = false) -> NSTextField {
+        NSTextField(labelWithAttributedString: caps(text, size: size, color: color, bold: bold))
+    }
+
+    /// Phrases : pas de capitales forcées, la lisibilité d'abord.
+    static func note(_ text: String, width: CGFloat = 560) -> NSTextField {
+        let t = NSTextField(wrappingLabelWithString: text)
+        t.font = font(11)
+        t.textColor = dim
+        t.preferredMaxLayoutWidth = width
+        return t
+    }
+
+    /// Champ de saisie : un puits sombre cerné d'un trait, sans bezel système.
+    static func style(_ f: NSTextField, placeholder: String, width: CGFloat = 440) {
+        f.font = font(13)
+        f.textColor = ink
+        f.drawsBackground = true
+        f.backgroundColor = well
+        f.isBezeled = false
+        f.isBordered = false
+        f.focusRingType = .none
+        f.wantsLayer = true
+        f.layer?.borderColor = dim.cgColor
+        f.layer?.borderWidth = 1
+        f.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+            .font: font(12), .foregroundColor: faint])
+        f.widthAnchor.constraint(equalToConstant: width).isActive = true
+        f.heightAnchor.constraint(equalToConstant: 24).isActive = true
+    }
+
+    static func row(_ views: [NSView], spacing: CGFloat = 10) -> NSStackView {
+        let r = NSStackView(views: views)
+        r.orientation = .horizontal
+        r.alignment = .centerY
+        r.spacing = spacing
+        return r
+    }
+
+    static func column(_ views: [NSView], spacing: CGFloat = 10) -> NSStackView {
+        let c = NSStackView(views: views)
+        c.orientation = .vertical
+        c.alignment = .leading
+        c.spacing = spacing
+        return c
+    }
+}
+
+/// Bouton encadré, capitales espacées. « primary » : plein, encre inversée,
+/// comme le bandeau du Kindle. S'inverse sous le doigt.
+final class ConsoleButton: NSButton {
+    private var label = ""
+    var primary = false { didSet { paint() } }
+    var selectedTab = false { didSet { paint() } }
+    private var pressed = false
+
+    convenience init(_ title: String, target: AnyObject?, action: Selector?, primary: Bool = false) {
+        self.init(frame: .zero)
+        self.target = target
+        self.action = action
+        self.label = title
+        self.primary = primary
+        isBordered = false
+        wantsLayer = true
+        layer?.borderWidth = 1.5
+        setButtonType(.momentaryChange)
+        paint()
+    }
+
+    func setLabel(_ text: String) { label = text; paint() }
+
+    override var isEnabled: Bool { didSet { paint() } }
+
+    override var intrinsicContentSize: NSSize {
+        let s = attributedTitle.size()
+        return NSSize(width: ceil(s.width) + 26, height: 26)
+    }
+
+    private func paint() {
+        let filled = (primary || selectedTab) != pressed
+        let fg = !isEnabled ? Console.faint : filled ? Console.back : Console.ink
+        layer?.backgroundColor = (filled && isEnabled ? Console.ink : Console.back).cgColor
+        layer?.borderColor = (isEnabled ? (selectedTab || primary ? Console.ink : Console.dim) : Console.faint).cgColor
+        attributedTitle = Console.caps(label, size: 11, color: fg, bold: true)
+        invalidateIntrinsicContentSize()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        pressed = true; paint()
+        super.mouseDown(with: event)   // boucle de suivi : rend la main au relâcher
+        pressed = false; paint()
+    }
+}
+
+/// Case à cocher façon terminal : [■] coché, [ ] non coché.
+final class ConsoleCheck: NSButton {
+    let name: String
+
+    init(_ name: String, on: Bool, target: AnyObject, action: Selector) {
+        self.name = name
+        super.init(frame: .zero)
+        setButtonType(.pushOnPushOff)
+        isBordered = false
+        self.target = target
+        self.action = action
+        state = on ? .on : .off
+        paint()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func paint() {
+        let on = state == .on
+        // Espaces de bord retirés à l'affichage seulement (« Organisation
+        // Générale » en porte un) : le nom réel reste celui transmis au Kindle.
+        let shown = name.trimmingCharacters(in: .whitespaces)
+        attributedTitle = NSAttributedString(string: (on ? "[■] " : "[ ] ") + shown, attributes: [
+            .font: Console.font(12), .foregroundColor: on ? Console.ink : Console.dim])
+    }
+}
+
+/// Cadre du Kindle : un trait, le titre en étiquette inversée posée dessus.
+final class FrameView: NSView {
+    private let title: String
+    override var isFlipped: Bool { true }
+
+    init(_ title: String, _ content: NSView) {
+        self.title = title
+        super.init(frame: .zero)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 30),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Console.ink.setStroke()
+        let border = NSBezierPath(rect: NSRect(x: 0.5, y: 9.5, width: bounds.width - 1, height: bounds.height - 10))
+        border.lineWidth = 1
+        border.stroke()
+        let text = Console.caps(title, size: 11, color: Console.back, bold: true, kern: 2)
+        let size = text.size()
+        let tag = NSRect(x: 12, y: 0, width: ceil(size.width) + 16, height: 19)
+        Console.ink.setFill()
+        tag.fill()
+        text.draw(at: NSPoint(x: tag.minX + 8, y: (tag.height - size.height) / 2))
+    }
+}
+
+/// Bandeau plein du haut, texte en négatif, l'état du pont à droite.
+final class BandView: NSView {
+    var status = "" { didSet { needsDisplay = true } }
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Console.ink.setFill()
+        bounds.fill()
+        let title = Console.caps("Nostrum", size: 20, color: Console.back, bold: true, kern: 5)
+        title.draw(at: NSPoint(x: 14, y: (bounds.height - title.size().height) / 2))
+        let sub = Console.caps("Ordinateur de bord", size: 9, color: Console.back, kern: 2)
+        sub.draw(at: NSPoint(x: 14 + title.size().width + 22, y: (bounds.height - sub.size().height) / 2 + 2))
+        let right = Console.caps(status, size: 10, color: Console.back, bold: true, kern: 2)
+        right.draw(at: NSPoint(x: bounds.width - right.size().width - 14, y: (bounds.height - right.size().height) / 2))
+    }
+}
+
+/// Fond noir, double cadre et équerres aux coins, comme le pourtour de l'écran.
+final class RootView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Console.back.setFill()
+        bounds.fill()
+        let top: CGFloat = 30   // sous la barre de titre transparente
+        for (inset, color) in [(CGFloat(6), Console.faint), (CGFloat(12), Console.ink)] {
+            color.setStroke()
+            let r = NSRect(x: inset + 0.5, y: top + inset - 6 + 0.5,
+                           width: bounds.width - 2 * inset - 1, height: bounds.height - top - 2 * inset + 6 - 1)
+            let p = NSBezierPath(rect: r)
+            p.lineWidth = 1
+            p.stroke()
+        }
+        // Équerres pleines aux quatre coins du cadre intérieur.
+        Console.ink.setFill()
+        let x0: CGFloat = 12, y0 = top + 6, x1 = bounds.width - 12, y1 = bounds.height - 12
+        let l: CGFloat = 22, t: CGFloat = 3
+        for (cx, cy, sx, sy) in [(x0, y0, 1.0, 1.0), (x1, y0, -1.0, 1.0), (x0, y1, 1.0, -1.0), (x1, y1, -1.0, -1.0)] {
+            NSRect(x: min(cx, cx + sx * l), y: min(cy, cy + sy * t), width: l, height: t).fill()
+            NSRect(x: min(cx, cx + sx * t), y: min(cy, cy + sy * l), width: t, height: l).fill()
+        }
+    }
+}
+
 /// Trois blocs : installer sur la Kindle, choisir les sources, l'état du pont.
 /// Ouverte au lancement manuel et par un clic sur l'icône du Dock ; jamais à
 /// l'ouverture de session, où elle serait une interruption et pas un service.
@@ -801,16 +1023,21 @@ final class Panel: NSObject, NSApplicationDelegate {
     private let window = NSWindow(contentRect: .zero,
                                   styleMask: [.titled, .closable, .miniaturizable],
                                   backing: .buffered, defer: false)
-    private var boxes: [(NSButton, Prefs.Kind, [String])] = []
+    private var boxes: [(ConsoleCheck, Prefs.Kind, [String])] = []
     private let city = NSTextField(string: "")
     private let icloudUser = NSTextField(string: "")
     private let icloudPassword = NSSecureTextField(string: "")
     private let icloudState = NSTextField(wrappingLabelWithString: "")
     private let screensaverPreview = NSImageView()
     private let kindleState = NSTextField(labelWithString: "")
-    private let installButton = NSButton(title: "Installer sur la Kindle", target: nil, action: nil)
+    private let installButton = ConsoleButton("Installer sur la Kindle", target: nil, action: nil, primary: true)
     private let footer = NSTextField(labelWithString: "")
-    private let updateButton = NSButton(title: "", target: nil, action: nil)
+    private let updateButton = ConsoleButton("", target: nil, action: nil, primary: true)
+    private let band = BandView()
+    private let tabHost = NSView()
+    private var tabButtons: [ConsoleButton] = []
+    private var tabViews: [NSView] = []
+    private var tab = 0
     /// Version publiée plus récente, et le DMG à télécharger.
     private var available: (version: String, dmg: URL)?
     private var timer: Timer?
@@ -824,23 +1051,25 @@ final class Panel: NSObject, NSApplicationDelegate {
         // pointerait alors dans le vide et les clics suivants sur l'icône du
         // Dock n'ouvriraient plus rien. On la garde, on la cache.
         window.isReleasedWhenClosed = false
+        // Fenêtre noire, barre de titre fondue dans le cadre : tout l'écran est
+        // la console. Apparence sombre pour les alertes et le curseur de saisie.
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = Console.back
         installButton.target = self
         installButton.action = #selector(installOnKindle)
-        installButton.bezelStyle = .rounded
         installButton.keyEquivalent = "\r"
-        city.placeholderString = "Ville pour la météo (ex : Dijon) — vide = sans météo"
+        Console.style(city, placeholder: "Dijon — vide = sans météo")
         city.stringValue = settings.city ?? ""
-        city.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        icloudUser.placeholderString = "Identifiant Apple (adresse e-mail)"
+        Console.style(icloudUser, placeholder: "adresse@icloud.com")
         icloudUser.stringValue = settings.icloudUser ?? ""
-        icloudPassword.placeholderString = "Mot de passe d'application (xxxx-xxxx-xxxx-xxxx)"
-        for f in [icloudUser, icloudPassword] {
-            f.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        }
-        icloudState.font = .systemFont(ofSize: 11)
-        icloudState.preferredMaxLayoutWidth = 520
-        footer.font = .systemFont(ofSize: 11)
-        footer.textColor = .secondaryLabelColor
+        Console.style(icloudPassword, placeholder: "xxxx-xxxx-xxxx-xxxx")
+        icloudState.font = Console.font(11)
+        icloudState.preferredMaxLayoutWidth = 560
+        updateButton.target = self
+        updateButton.action = #selector(download)
         let nc = NSWorkspace.shared.notificationCenter
         for n in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
             nc.addObserver(self, selector: #selector(refreshKindle), name: n, object: nil)
@@ -859,10 +1088,10 @@ final class Panel: NSObject, NSApplicationDelegate {
 
     @objc func refreshKindle() {
         if let v = kindleVolume() {
-            kindleState.stringValue = "Kindle détectée : \(v.lastPathComponent)"
+            kindleState.attributedStringValue = Console.caps("● Kindle détectée : \(v.lastPathComponent)", color: Console.ink, bold: true)
             installButton.isEnabled = true
         } else {
-            kindleState.stringValue = "Branchez la Kindle en USB (KOReader doit déjà y être installé)."
+            kindleState.attributedStringValue = Console.caps("○ Kindle non branchée", color: Console.dim)
             installButton.isEnabled = false
         }
     }
@@ -947,11 +1176,11 @@ final class Panel: NSObject, NSApplicationDelegate {
 
     private func refreshICloud() {
         if let user = settings.icloudUser, ICloudPassword.read(user) != nil {
-            icloudState.stringValue = "Enregistré pour \(user). Réinstallez sur la Kindle pour le lui transmettre."
-            icloudState.textColor = .labelColor
+            icloudState.stringValue = "● Enregistré pour \(user). Réinstallez sur la Kindle pour le lui transmettre."
+            icloudState.textColor = Console.ink
         } else {
-            icloudState.stringValue = "Non configuré : Mac éteint, la Kindle n'affichera plus l'agenda."
-            icloudState.textColor = .secondaryLabelColor
+            icloudState.stringValue = "○ Non configuré : Mac éteint, la Kindle n'affichera plus l'agenda."
+            icloudState.textColor = Console.dim
         }
     }
 
@@ -1047,18 +1276,106 @@ final class Panel: NSObject, NSApplicationDelegate {
 
     // MARK: Construction
 
-    private func section(_ title: String) -> NSTextField {
-        let t = NSTextField(labelWithString: title)
-        t.font = .boldSystemFont(ofSize: 13)
-        return t
+    private func sourcesTab() -> NSView {
+        var cols: [NSView] = []
+        for (kind, titre, entite) in [(Prefs.Kind.calendars, "Calendriers", EKEntityType.event),
+                                      (Prefs.Kind.lists, "Listes de rappels", EKEntityType.reminder)] {
+            let noms = store.sources(entite)
+            var rows: [NSView] = []
+            if noms.isEmpty {
+                // Le cas d'un accès refusé : le dire, plutôt qu'une colonne
+                // vide qu'on prendrait pour un compte sans calendrier.
+                rows.append(Console.note("Accès refusé ou aucune source.\nRéglages Système → Confidentialité et sécurité → \(titre == "Calendriers" ? "Calendriers" : "Rappels").", width: 250))
+            }
+            for nom in noms {
+                let b = ConsoleCheck(nom, on: prefs.isOn(kind, nom), target: self, action: #selector(clic(_:)))
+                boxes.append((b, kind, noms))
+                rows.append(b)
+            }
+            cols.append(FrameView(titre, Console.column(rows, spacing: 7)))
+        }
+        let colonnes = Console.row(cols, spacing: 18)
+        colonnes.alignment = .top
+        colonnes.distribution = .fillEqually
+        return Console.column([
+            colonnes,
+            Console.note("[■] = affiché sur le Kindle. Tout décocher revient à tout afficher."),
+        ], spacing: 12)
     }
 
-    private func note(_ text: String) -> NSTextField {
-        let t = NSTextField(wrappingLabelWithString: text)
-        t.preferredMaxLayoutWidth = 520
-        t.font = .systemFont(ofSize: 11)
-        t.textColor = .secondaryLabelColor
-        return t
+    private func kindleTab() -> NSView {
+        let save = ConsoleButton("Enregistrer dans un dossier…", target: self, action: #selector(saveToFolder))
+        return Console.column([
+            FrameView("Installation", Console.column([
+                Console.label("Ville pour la météo"),
+                city,
+                Console.row([installButton, save]),
+                kindleState,
+            ], spacing: 12)),
+            Console.note("Branchez la Kindle en USB, KOReader déjà installé. Pour une Kindle qui ne s'ouvre pas comme un disque, « Enregistrer dans un dossier » prépare le plugin à copier dans koreader/plugins/."),
+        ], spacing: 12)
+    }
+
+    private func icloudTab() -> NSView {
+        let verify = ConsoleButton("Vérifier et enregistrer", target: self, action: #selector(saveICloud), primary: true)
+        let create = ConsoleButton("Créer un mot de passe…", target: self, action: #selector(openAppleAccount))
+        let drop = ConsoleButton("Retirer", target: self, action: #selector(removeICloud))
+        refreshICloud()
+        return Console.column([
+            FrameView("Agenda sans le Mac", Console.column([
+                Console.note("Mac éteint, la Kindle peut lire l'agenda iCloud directement. Il faut un mot de passe d'application Apple : compte Apple → Connexion et sécurité → Mots de passe pour les apps. Les rappels demandent toujours le Mac."),
+                Console.label("Identifiant Apple"),
+                icloudUser,
+                Console.label("Mot de passe d'application"),
+                icloudPassword,
+                Console.row([verify, create, drop]),
+                icloudState,
+            ], spacing: 10)),
+        ])
+    }
+
+    private func veilleTab() -> NSView {
+        screensaverPreview.imageScaling = .scaleProportionallyUpOrDown
+        screensaverPreview.wantsLayer = true
+        screensaverPreview.layer?.borderColor = Console.ink.cgColor
+        screensaverPreview.layer?.borderWidth = 1
+        screensaverPreview.layer?.backgroundColor = Console.well.cgColor
+        if screensaverPreview.constraints.isEmpty {
+            screensaverPreview.widthAnchor.constraint(equalToConstant: 120).isActive = true
+            screensaverPreview.heightAnchor.constraint(equalToConstant: 160).isActive = true
+        }
+        refreshScreensaver()
+        let pick = ConsoleButton("Choisir une image…", target: self, action: #selector(chooseScreensaver), primary: true)
+        let unpick = ConsoleButton("Retirer", target: self, action: #selector(removeScreensaver))
+        let col = Console.column([
+            Console.note("Image affichée par la Kindle pendant la veille. Elle lui est transmise à sa prochaine synchronisation, sans câble.", width: 380),
+            Console.row([pick, unpick]),
+        ], spacing: 14)
+        let row = Console.row([screensaverPreview, col], spacing: 18)
+        row.alignment = .top
+        return Console.column([FrameView("Écran de veille", row)])
+    }
+
+    private func systemTab() -> NSView {
+        let ips = localIPv4()
+        func line(_ key: String, _ value: String) -> NSView {
+            let k = Console.label(key)
+            k.widthAnchor.constraint(equalToConstant: 170).isActive = true
+            return Console.row([k, NSTextField(labelWithAttributedString: Console.caps(value, size: 12, bold: true))])
+        }
+        let remove = ConsoleButton("Désinstaller…", target: self, action: #selector(uninstall))
+        return Console.column([
+            FrameView("État du pont", Console.column([
+                line("Pont", listening ? "Actif" : "Démarrage…"),
+                line("Adresses", ips.isEmpty ? "Aucun réseau local" : ips.map { "\($0):\(settings.port)" }.joined(separator: "  ")),
+                line("Version", plugin.version()),
+                line("Mise à jour", available.map { "\($0.version) disponible" } ?? "À jour"),
+            ], spacing: 9)),
+            FrameView("Maintenance", Console.column([
+                Console.note("Supprime le lancement à l'ouverture de session et les réglages de ce Mac. Vos rappels et votre agenda ne sont pas touchés."),
+                remove,
+            ], spacing: 12)),
+        ], spacing: 16)
     }
 
     /// Reconstruite à chaque ouverture : un calendrier ajouté côté iCloud doit
@@ -1066,120 +1383,83 @@ final class Panel: NSObject, NSApplicationDelegate {
     /// accordé entre-temps.
     private func build() {
         boxes.removeAll()
-
-        // Kindle
-        let save = NSButton(title: "Enregistrer dans un dossier…", target: self, action: #selector(saveToFolder))
-        save.bezelStyle = .rounded
-        let buttons = NSStackView(views: [installButton, save])
-
-        // Secours iCloud
-        let verify = NSButton(title: "Vérifier et enregistrer", target: self, action: #selector(saveICloud))
-        let create = NSButton(title: "Créer un mot de passe d'application…", target: self, action: #selector(openAppleAccount))
-        let drop = NSButton(title: "Retirer", target: self, action: #selector(removeICloud))
-        for b in [verify, create, drop] { b.bezelStyle = .rounded }
-        let icloudButtons = NSStackView(views: [verify, create, drop])
-
-        // Écran de veille : aperçu + boutons, l'explication à côté.
-        screensaverPreview.imageScaling = .scaleProportionallyUpOrDown
-        screensaverPreview.imageFrameStyle = .grayBezel
-        screensaverPreview.widthAnchor.constraint(equalToConstant: 66).isActive = true
-        screensaverPreview.heightAnchor.constraint(equalToConstant: 88).isActive = true
-        refreshScreensaver()
-        let pick = NSButton(title: "Choisir une image…", target: self, action: #selector(chooseScreensaver))
-        let unpick = NSButton(title: "Retirer", target: self, action: #selector(removeScreensaver))
-        for b in [pick, unpick] { b.bezelStyle = .rounded }
-        let veilleCol = NSStackView(views: [
-            note("Image affichée par la Kindle pendant la veille. Elle lui est transmise à sa prochaine synchronisation, sans câble."),
-            NSStackView(views: [pick, unpick]),
-        ])
-        veilleCol.orientation = .vertical
-        veilleCol.alignment = .leading
-        let veilleRow = NSStackView(views: [screensaverPreview, veilleCol])
-        veilleRow.alignment = .top
-        veilleRow.spacing = 14
-        refreshICloud()
         refreshKindle()
-
-        // Sources
-        let colonnes = NSStackView()
-        colonnes.orientation = .horizontal
-        colonnes.alignment = .top
-        colonnes.spacing = 32
-        for (kind, titre, entite) in [(Prefs.Kind.calendars, "Calendriers", EKEntityType.event),
-                                      (Prefs.Kind.lists, "Listes de rappels", EKEntityType.reminder)] {
-            let noms = store.sources(entite)
-            let col = NSStackView()
-            col.orientation = .vertical
-            col.alignment = .leading
-            col.spacing = 6
-            let entete = NSTextField(labelWithString: titre)
-            entete.font = .systemFont(ofSize: 12, weight: .semibold)
-            col.addArrangedSubview(entete)
-            if noms.isEmpty {
-                // Le cas d'un accès refusé : le dire, plutôt qu'une colonne
-                // vide qu'on prendrait pour un compte sans calendrier.
-                col.addArrangedSubview(note("Accès refusé ou aucune source.\nRéglages Système → Confidentialité\net sécurité → \(titre == "Calendriers" ? "Calendriers" : "Rappels")"))
-            }
-            for nom in noms {
-                let b = NSButton(checkboxWithTitle: nom, target: self, action: #selector(clic(_:)))
-                b.state = prefs.isOn(kind, nom) ? .on : .off
-                boxes.append((b, kind, noms))
-                col.addArrangedSubview(b)
-            }
-            colonnes.addArrangedSubview(col)
+        let titles = ["Kindle", "Sources", "Secours iCloud", "Veille", "Système"]
+        tabViews = [kindleTab(), sourcesTab(), icloudTab(), veilleTab(), systemTab()]
+        tabButtons = titles.enumerated().map { i, t in
+            let b = ConsoleButton(t, target: self, action: #selector(selectTab(_:)))
+            b.tag = i
+            return b
         }
 
-        // État
-        refreshFooter()
-        let remove = NSButton(title: "Désinstaller…", target: self, action: #selector(uninstall))
-        remove.bezelStyle = .rounded
-        remove.controlSize = .small
-        updateButton.target = self
-        updateButton.action = #selector(download)
-        updateButton.bezelStyle = .rounded
-        updateButton.controlSize = .small
-        let bas = NSStackView(views: [footer, updateButton, remove])
-
-        let tout = NSStackView(views: [
-            section("Kindle"), city, buttons, kindleState,
-            NSBox.separator(),
-            section("Agenda sans le Mac (facultatif)"),
-            note("Mac éteint, la Kindle peut lire l'agenda iCloud directement. Il faut un mot de passe d'application Apple : compte Apple → Connexion et sécurité → Mots de passe pour les apps. Les rappels demandent toujours le Mac."),
-            icloudUser, icloudPassword, icloudButtons, icloudState,
-            NSBox.separator(),
-            section("Écran de veille de la Kindle (facultatif)"),
-            veilleRow,
-            NSBox.separator(),
-            section("Sources affichées"), colonnes,
-            note("Coché = affiché sur le Kindle. Tout décocher revient à tout afficher."),
-            NSBox.separator(),
-            bas,
+        let root = RootView()
+        for v in [band, tabHost] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        let tabs = Console.row(tabButtons, spacing: 8)
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        let bas = Console.row([footer, updateButton])
+        for v in [band, tabs, tabHost, bas] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        // Hauteur du contenu = celle du plus grand onglet : la fenêtre ne
+        // saute pas d'un onglet à l'autre.
+        let width: CGFloat = 660
+        let contentH = tabViews.map { $0.fittingSize.height }.max() ?? 300
+        NSLayoutConstraint.activate([
+            band.topAnchor.constraint(equalTo: root.topAnchor, constant: 48),
+            band.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 26),
+            band.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -26),
+            band.heightAnchor.constraint(equalToConstant: 40),
+            tabs.topAnchor.constraint(equalTo: band.bottomAnchor, constant: 16),
+            tabs.leadingAnchor.constraint(equalTo: band.leadingAnchor),
+            tabHost.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 18),
+            tabHost.leadingAnchor.constraint(equalTo: band.leadingAnchor),
+            tabHost.trailingAnchor.constraint(equalTo: band.trailingAnchor),
+            tabHost.heightAnchor.constraint(equalToConstant: contentH),
+            bas.topAnchor.constraint(equalTo: tabHost.bottomAnchor, constant: 16),
+            bas.leadingAnchor.constraint(equalTo: band.leadingAnchor),
+            bas.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -26),
+            root.widthAnchor.constraint(equalToConstant: width + 52),
         ])
-        tout.orientation = .vertical
-        tout.alignment = .leading
-        tout.spacing = 10
-        tout.edgeInsets = NSEdgeInsets(top: 18, left: 20, bottom: 16, right: 20)
-        for v in tout.arrangedSubviews where v is NSBox {
-            v.widthAnchor.constraint(equalTo: tout.widthAnchor, constant: -40).isActive = true
-        }
-
-        window.contentView = tout
-        window.setContentSize(tout.fittingSize)
+        refreshFooter()
+        window.contentView = root
+        showTab(tab)
+        window.setContentSize(root.fittingSize)
         window.center()
     }
 
+    private func showTab(_ i: Int) {
+        tab = i
+        tabHost.subviews.forEach { $0.removeFromSuperview() }
+        let v = tabViews[i]
+        v.translatesAutoresizingMaskIntoConstraints = false
+        tabHost.addSubview(v)
+        NSLayoutConstraint.activate([
+            v.topAnchor.constraint(equalTo: tabHost.topAnchor),
+            v.leadingAnchor.constraint(equalTo: tabHost.leadingAnchor),
+            v.trailingAnchor.constraint(equalTo: tabHost.trailingAnchor),
+        ])
+        for b in tabButtons { b.selectedTab = b.tag == i }
+    }
+
+    @objc private func selectTab(_ sender: NSButton) { showTab(sender.tag) }
+
     func refreshFooter() {
         updateButton.isHidden = available == nil
-        updateButton.title = available.map { "Télécharger la version \($0.version)" } ?? ""
+        updateButton.setLabel(available.map { "Télécharger la version \($0.version)" } ?? "")
         let ips = localIPv4()
-        footer.stringValue = !listening ? "Pont en cours de démarrage…"
-            : ips.isEmpty ? "Pont actif, mais ce Mac n'est sur aucun réseau local."
-            : "Pont actif — \(ips.map { "\($0):\(settings.port)" }.joined(separator: ", ")) · version \(plugin.version())"
+        let text = !listening ? "Pont · démarrage…"
+            : ips.isEmpty ? "Pont actif · aucun réseau local"
+            : "Pont actif · \(ips.map { "\($0):\(settings.port)" }.joined(separator: "  ")) · v\(plugin.version())"
+        footer.attributedStringValue = Console.caps(text, size: 10, color: Console.dim)
+        band.status = !listening ? "Démarrage" : "Pont actif"
     }
 
     @objc private func clic(_ sender: NSButton) {
-        guard let (_, kind, noms) = boxes.first(where: { $0.0 === sender }) else { return }
-        prefs.set(kind, sender.title, on: sender.state == .on, all: noms)
+        guard let check = sender as? ConsoleCheck,
+              let (_, kind, noms) = boxes.first(where: { $0.0 === check }) else { return }
+        check.paint()
+        prefs.set(kind, check.name, on: check.state == .on, all: noms)
         DispatchQueue.global().async { updateBadge() }
     }
 
@@ -1274,14 +1554,6 @@ func mainMenu() -> NSMenu {
         menu.addItem(item)
     }
     return menu
-}
-
-extension NSBox {
-    static func separator() -> NSBox {
-        let b = NSBox()
-        b.boxType = .separator
-        return b
-    }
 }
 
 let application = NSApplication.shared
