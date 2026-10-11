@@ -1436,14 +1436,47 @@ final class Panel: NSObject, NSApplicationDelegate {
         ], spacing: 16, fill: true)
     }
 
+    private func aboutTab() -> NSView {
+        // `exact` : valeur affichée telle quelle — une adresse web se tape en
+        // minuscules, les capitales la rendraient fausse.
+        func line(_ key: String, _ value: String, exact: Bool = false) -> NSView {
+            let k = Console.label(key)
+            k.widthAnchor.constraint(equalToConstant: 150).isActive = true
+            let v = exact
+                ? NSAttributedString(string: value, attributes: [.font: Console.font(12, bold: true), .foregroundColor: Console.ink])
+                : Console.caps(value, size: 12, bold: true)
+            let r = Console.row([k, NSTextField(labelWithAttributedString: v)])
+            r.alignment = .firstBaseline
+            return r
+        }
+        let repo = ConsoleButton("Voir le code source", target: self, action: #selector(openRepository), primary: true)
+        return Console.column([
+            FrameView("À propos", Console.column([
+                NSTextField(labelWithAttributedString: Console.caps("L'ordinateur de bord de votre journée", size: 12, bold: true)),
+                line("Conçu par", "David"),
+                line("Version", plugin.version()),
+                line("Licence", "MIT — libre"),
+                line("Code source", "github.com/david-guia/nostrum", exact: true),
+                repo,
+            ], spacing: 12)),
+            FrameView("Vos données", Console.column([
+                Console.note("Agenda et rappels passent du Mac au Kindle sur votre réseau local, protégés par un jeton propre à cette installation : aucun compte, aucun serveur intermédiaire. Seules sorties vers Internet : la météo (Open-Meteo), la vérification des mises à jour (GitHub) et, si vous l'activez, le secours iCloud."),
+            ])),
+        ], spacing: 16, fill: true)
+    }
+
+    @objc func openRepository() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/david-guia/nostrum")!)
+    }
+
     /// Reconstruite à chaque ouverture : un calendrier ajouté côté iCloud doit
     /// apparaître sans relancer l'application, et l'accès peut avoir été
     /// accordé entre-temps.
     private func build() {
         boxes.removeAll()
         refreshKindle()
-        let titles = ["Kindle", "Sources", "Secours iCloud", "Veille", "Système"]
-        tabViews = [kindleTab(), sourcesTab(), icloudTab(), veilleTab(), systemTab()]
+        let titles = ["Kindle", "Sources", "Secours iCloud", "Veille", "Système", "À propos"]
+        tabViews = [kindleTab(), sourcesTab(), icloudTab(), veilleTab(), systemTab(), aboutTab()]
         tabButtons = titles.enumerated().map { i, t in
             let b = ConsoleButton(t, target: self, action: #selector(selectTab(_:)))
             b.tag = i
