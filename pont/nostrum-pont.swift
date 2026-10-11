@@ -628,13 +628,14 @@ func geocode(_ city: String, done: @escaping (Result<(String, Double, Double), E
 
 // MARK: - Nouvelle version
 
-/// Version officielle, publiée par pont/publier.sh : { "version", "dmg" }.
-/// L'application ne se remplace pas elle-même : elle signale la nouvelle
-/// version et propose de télécharger le DMG. NOSTRUM_FEED la remplace pour
-/// les essais.
+/// Version officielle : la dernière Release du dépôt d'origine, publiée par
+/// pont/publier.sh (tag « vX.Y.Z », fichier Nostrum.dmg). L'application ne se
+/// remplace pas elle-même : elle signale la nouvelle version et propose le
+/// DMG. NOSTRUM_FEED la remplace pour les essais.
 let versionFeed = URL(string: ProcessInfo.processInfo.environment["NOSTRUM_FEED"]
-    ?? "https://raw.githubusercontent.com/david-guia/nostrum-releases/main/latest.json")!
-let downloadDMG = URL(string: "https://github.com/david-guia/nostrum-releases/raw/main/Nostrum.dmg")!
+    ?? "https://api.github.com/repos/david-guia/nostrum/releases/latest")!
+/// Lien fixe de GitHub vers le Nostrum.dmg de la dernière Release.
+let downloadDMG = URL(string: "https://github.com/david-guia/nostrum/releases/latest/download/Nostrum.dmg")!
 let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 
 /// « 1.10 » est plus récent que « 1.9 » : comparaison champ par champ. Plus
@@ -653,13 +654,17 @@ func isNewer(_ a: String, than b: String) -> Bool {
 func checkLatest(_ found: @escaping (String, URL) -> Void) {
     var req = URLRequest(url: versionFeed)
     req.cachePolicy = .reloadIgnoringLocalCacheData
+    req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
     URLSession.shared.dataTask(with: req) { data, _, _ in
         guard let data,
-              let feed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = feed["version"] as? String, isNewer(version, than: currentVersion)
+              let release = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = release["tag_name"] as? String
         else { return }
-        let dmg = (feed["dmg"] as? String).flatMap(URL.init(string:)) ?? downloadDMG
-        DispatchQueue.main.async { found(version, dmg) }
+        let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        guard isNewer(version, than: currentVersion) else { return }
+        let assets = release["assets"] as? [[String: Any]] ?? []
+        let dmg = assets.first { $0["name"] as? String == "Nostrum.dmg" }?["browser_download_url"] as? String
+        DispatchQueue.main.async { found(version, dmg.flatMap(URL.init(string:)) ?? downloadDMG) }
     }.resume()
 }
 

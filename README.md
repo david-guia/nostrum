@@ -52,15 +52,15 @@ chaque version.
   un balayage toutes les 5 minutes.
 - **Mises à jour** : rien ne s'installe seul. Pour publier : changer
   `local VERSION` dans `main.lua`, committer, puis
-  `pont/publier.sh`, qui construit et signe sur ce Mac et pousse dans le dépôt
-  public `david-guia/nostrum-releases` le DMG et `latest.json` (la version
-  officielle). L'app Mac lit ce fichier à l'ouverture puis toutes les 6 h ; si
+  `pont/publier.sh`, qui construit et signe sur ce Mac, pousse les sources et
+  crée la Release `vX.Y.Z` de ce dépôt avec `Nostrum.dmg`. L'app Mac lit la
+  dernière Release (API GitHub) à chaque démarrage puis toutes les 6 h ; si
   elle est plus ancienne, elle propose de télécharger le DMG (alerte, puis
   bouton en bas de la fenêtre). Le Kindle compare sa version à celle du Mac à
   chaque synchro et, si elles diffèrent, propose d'installer celle du Mac
   (une fois par version et par session) puis de redémarrer KOReader.
 - **Lien de téléchargement client** :
-  https://github.com/david-guia/nostrum-releases/raw/main/Nostrum.dmg
+  https://github.com/david-guia/nostrum/releases/latest/download/Nostrum.dmg
 
 **Secours iCloud (facultatif)** : dans l'app Mac, section *Agenda sans le Mac*,
 identifiant Apple + mot de passe d'application. L'app les vérifie auprès
