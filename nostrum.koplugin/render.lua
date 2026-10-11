@@ -338,8 +338,9 @@ assert(dernier_delai >= 2 and dernier_delai <= 62 and math.abs(dernier_delai - a
     "le minuteur doit viser le prochain changement de minute : " .. tostring(dernier_delai))
 peints = {}
 assert(derouler() == 1, "un seul minuteur d'horloge attendu")
-assert(#peints == 1 and peints[1].mode == "ui" and peints[1].zone == horloge.clock_zone,
-    "chaque minute : rafraichissement partiel de la seule zone de l'horloge")
+assert(#peints == 2 and peints[1].mode == "ui" and peints[1].zone == horloge.clock_zone
+    and peints[2].zone == horloge.signal_zone,
+    "chaque minute : rafraichissement partiel de l'horloge et de la jauge Wi-Fi, rien d'autre")
 assert(#differes == 1, "le minuteur doit se reprogrammer pour la minute suivante")
 -- Reveil : le minuteur fige est recale, sans en empiler un second.
 horloge.sync = function() end
@@ -368,6 +369,19 @@ ops_wifi_coupe = ops
 assert(v_ok.wifi_shown == "connected" and v_on.wifi_shown == "on" and v_off.wifi_shown == "off",
     "etats Wi-Fi mal lus")
 assert(n_off > n_ok and n_ok > n_on, "coupe = barre en plus ; allume sans connexion = un seul arc")
+-- Jauge du signal : tout blanc sans Wi-Fi utilisable. Connecte, le niveau vient
+-- de /proc/net/wireless (absent ici : plein, la connexion est ce qui compte).
+assert(v_off.signal_shown == 0 and v_on.signal_shown == 0, "Wi-Fi coupe ou non connecte : 5 blocs blancs")
+assert(v_ok.signal_shown == 5, "connecte, niveau inconnu : jauge pleine")
+assert(v_ok.signal_zone and v_ok.signal_zone.y > v_ok.clock_zone.y + v_ok.clock_zone.h,
+    "la jauge est dans le panneau ETAT, sous le bandeau")
+local barres = Nostrum._bars_from
+local entete = "Inter-| sta-|   Quality        |\n face | tus | link level noise |\n"
+assert(barres(entete .. " wlan0: 0000   65.  -45.  -256        0      0      0      0      0        0") == 5, "-45 dBm = 5")
+assert(barres(entete .. " wlan0: 0000   40.  -66.  -256        0") == 3, "-66 dBm = 3")
+assert(barres(entete .. " wlan0: 0000   10.  -90.  -256        0") == 1, "tres faible mais connecte = 1")
+assert(barres(entete .. " wlan0: 0000   35   0     0           0") == 3, "qualite seule : 35/70 = 3")
+assert(barres(entete) == nil and barres(nil) == nil, "pas d'interface : inconnu")
 NM.isWifiOn, NM.isConnected = nil, nil
 ops = {}
 local v_rien = Nostrum.View:new{ cfg = view.cfg, status = "LIAISON OK" }

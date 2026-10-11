@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.4.0"
+local VERSION = "1.5.0"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -324,6 +324,36 @@ local function wifi_state()
     return "on"
 end
 
+-- Puissance du signal en barres (0 a 5), d'apres /proc/net/wireless : le noyau
+-- Linux la publie lui-meme, sans passer par le service Wi-Fi d'Amazon, celui
+-- qui se bloque au reveil. Niveau en dBm (negatif) ; certains pilotes ne
+-- donnent que la qualite du lien, sur 70.
+local function bars_from(text)
+    for line in tostring(text or ""):gmatch("[^\n]+") do
+        local link, level = line:match("^%s*[%w_]+:%s+%x+%s+(%-?%d+)%.?%s+(%-?%d+)%.?")
+        if link then
+            level, link = tonumber(level), tonumber(link)
+            if level and level < 0 then
+                return level >= -55 and 5 or level >= -62 and 4 or level >= -70 and 3
+                    or level >= -78 and 2 or 1
+            end
+            return math.max(1, math.min(5, math.floor(link / 70 * 5 + 0.5)))
+        end
+    end
+    return nil
+end
+
+-- 0 = pas de Wi-Fi utilisable (coupe, mode avion, ou pas connecte) : tout
+-- blanc. Connecte mais niveau illisible : plein, la connexion est ce qui compte.
+local function wifi_bars()
+    if wifi_state() ~= "connected" then return 0 end
+    local f = io.open("/proc/net/wireless", "r")
+    if not f then return 5 end
+    local text = f:read("*a")
+    f:close()
+    return bars_from(text) or 5
+end
+
 -- Eventail ouvert vers le haut, pose sur son point (cx, by). Connecte : trois
 -- arcs. Allume sans connexion : le premier seulement. Coupe : les trois,
 -- barres d'une diagonale — d'abord une saignee couleur du fond, puis un trait
@@ -582,12 +612,14 @@ function View:paintTo(bb, x, y)
         wide_mid(bb, rail_x + p(8), R - p(9), ry + p(3), kv[2], f_small, INK, 1, true)
         ry = ry + p(28)
     end
-    ticks(bb, rail_x + p(9), R - p(9), ry + p(2), p(6), p(3), FAINT)
+    -- Jauge du signal Wi-Fi : 5 blocs pleins = excellent, tout blanc = pas de
+    -- Wi-Fi (mode avion compris). La batterie reste en chiffres dans la grille.
+    local gauge_top = ry
+    wide(bb, rail_x + p(9), ry - p(1), "SIGNAL WI-FI", f_tiny, DIM, 1, false, R - p(9))
     ry = ry + p(12)
-
-    -- Jauge de charge : 5 blocs, 20 % chacun. Redondant avec BATTERIE, mais
-    -- c'est le seul indicateur qui bouge tout seul.
-    local lit = math.floor((tonumber(batt) or 0) / 20 + 0.5)
+    local lit = wifi_bars()
+    self.signal_shown = lit
+    self.signal_zone = Geom:new{ x = rail_x, y = gauge_top - p(2), w = R - rail_x, h = ry + p(12) - gauge_top }
     for i = 0, 4 do
         local bx = rail_x + p(9) + i * p(22)
         if i < lit then fill(bb, bx, ry, p(16), p(10), INK) end
@@ -1150,6 +1182,8 @@ function View:start_clock()
     self.clock_tick = function()
         hide_kindle_chrome()
         if self.clock_zone then UIManager:setDirty(self, "ui", self.clock_zone) end
+        -- La jauge Wi-Fi suit la minute elle aussi.
+        if self.signal_zone then UIManager:setDirty(self, "ui", self.signal_zone) end
         self:start_clock()
     end
     -- 2 s apres le changement de minute : si l'horloge d'Amazon se repeint
@@ -1528,5 +1562,6 @@ Nostrum._update = update_from_bridge
 Nostrum._restore = restore_archive
 Nostrum._archived = archived_versions
 Nostrum._toggle_pick = toggle_pick
+Nostrum._bars_from = bars_from
 
 return Nostrum
