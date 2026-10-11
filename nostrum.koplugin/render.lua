@@ -349,8 +349,8 @@ assert(#differes == 1, "le reveil ne doit pas doubler le minuteur")
 horloge:stopTimers()
 assert(#differes == 0, "fermer l'ecran doit arreter l'horloge")
 
--- Pictogramme Wi-Fi : trois etats lus sur KOReader, rien si KOReader ne sait
--- pas repondre. Il tient dans le bandeau, a gauche de l'heure.
+-- Etat du Wi-Fi : trois etats lus sur KOReader, nil si KOReader ne sait pas
+-- repondre. Il alimente la jauge SIGNAL WI-FI et le champ LIAISON.
 local NM = package.loaded["ui/network/manager"]
 local function trace_wifi(on, connecte)
     NM.isWifiOn = function() return on end
@@ -368,7 +368,7 @@ local v_off, n_off = trace_wifi(false, false)
 ops_wifi_coupe = ops
 assert(v_ok.wifi_shown == "connected" and v_on.wifi_shown == "on" and v_off.wifi_shown == "off",
     "etats Wi-Fi mal lus")
-assert(n_off > n_ok and n_ok > n_on, "coupe = barre en plus ; allume sans connexion = un seul arc")
+assert(v_off.status == "LIAISON OK", "garde-fou du test")
 -- Jauge du signal : tout blanc sans Wi-Fi utilisable. Connecte, le niveau vient
 -- de /proc/net/wireless (absent ici : plein, la connexion est ce qui compte).
 assert(v_off.signal_shown == 0 and v_on.signal_shown == 0, "Wi-Fi coupe ou non connecte : 5 blocs blancs")
@@ -386,7 +386,7 @@ NM.isWifiOn, NM.isConnected = nil, nil
 ops = {}
 local v_rien = Nostrum.View:new{ cfg = view.cfg, status = "LIAISON OK" }
 v_rien:paintTo(bb, 0, 0)
-assert(v_rien.wifi_shown == nil, "sans reponse de KOReader : pas d'icone")
+assert(v_rien.wifi_shown == nil, "sans reponse de KOReader : etat inconnu")
 icone_wifi = v_off
 
 -- Barre d'etat d'Amazon : retiree a la veille, au reveil et a chaque minute,

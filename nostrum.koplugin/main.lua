@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.5.0"
+local VERSION = "1.6.0"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -312,11 +312,11 @@ local function stroke(bb, x0, y0, x1, y1, w, color)
     end
 end
 
---== Pictogramme du Wi-Fi ====================================================
+--== Etat du Wi-Fi ===========================================================
 -- Etat lu a chaque repeint, donc chaque minute avec l'horloge : une radio
 -- restee coupee au reveil (le « mode avion » du Kindle) se voit sans ouvrir de
--- menu. nil = KOReader trop ancien pour le dire : pas d'icone plutot qu'une
--- icone fausse.
+-- menu, dans la jauge SIGNAL WI-FI et le champ LIAISON. nil = KOReader trop
+-- ancien pour le dire.
 local function wifi_state()
     if not (NetworkMgr.isWifiOn or NetworkMgr.isConnected) then return nil end
     if NetworkMgr.isWifiOn and not NetworkMgr:isWifiOn() then return "off" end
@@ -352,29 +352,6 @@ local function wifi_bars()
     local text = f:read("*a")
     f:close()
     return bars_from(text) or 5
-end
-
--- Eventail ouvert vers le haut, pose sur son point (cx, by). Connecte : trois
--- arcs. Allume sans connexion : le premier seulement. Coupe : les trois,
--- barres d'une diagonale — d'abord une saignee couleur du fond, puis un trait
--- fin, sinon la barre se confond avec les arcs.
-local function wifi_glyph(bb, cx, by, r, state, ink, back)
-    local w = math.max(2, math.floor(r * 0.16))
-    disc(bb, cx, by, math.max(1, math.floor(r * 0.14)), ink)
-    for i = 1, (state == "on") and 1 or 3 do
-        local rr = r * (0.35 + 0.30 * (i - 1))
-        local px, py
-        for a = 45, 135, 15 do
-            local t = math.rad(a)
-            local x, y = cx + rr * math.cos(t), by - rr * math.sin(t)
-            if px then stroke(bb, px, py, x, y, w, ink) end
-            px, py = x, y
-        end
-    end
-    if state == "off" then
-        stroke(bb, cx - r * 0.75, by - r, cx + r * 0.75, by + r * 0.1, w * 3, back)
-        stroke(bb, cx - r * 0.75, by - r, cx + r * 0.75, by + r * 0.1, w, ink)
-    end
 end
 
 local function sun(bb, cx, cy, r, color)
@@ -554,11 +531,8 @@ function View:paintTo(bb, x, y)
     local clock_x = R - sw - p(34) - cw
     wide(bb, clock_x, y + p(36), clock, f_small, BG, 2)
 
-    -- Wi-Fi juste a gauche de l'heure, dans le bandeau : repeint avec elle.
+    -- Etat du Wi-Fi : lu ici pour LIAISON ; la jauge du panneau ETAT le montre.
     self.wifi_shown = wifi_state()
-    if self.wifi_shown then
-        wifi_glyph(bb, clock_x - p(20), y + p(51), p(15), self.wifi_shown, BG, INK)
-    end
 
     self.close_zone = { top = band_top, bottom = band_bot }
 
