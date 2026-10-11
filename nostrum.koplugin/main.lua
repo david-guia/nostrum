@@ -22,7 +22,7 @@ local _ = require("gettext")
 -- Version du plugin, affichee dans le bandeau. Entier +1 pour un gros
 -- changement, +0.1 pour un changement mineur. Elle remplace la revision du
 -- firmware, qui n'apprenait rien : c'est ce fichier qui bouge, pas le Kindle.
-local VERSION = "1.6.0"
+local VERSION = "1.7.0"
 
 -- Le chargeur de plugins n'ajoute pas toujours le dossier du plugin au package.path
 -- selon la version de KOReader. Sans ça, require("nostrum_caldav") échoue et le plugin
@@ -920,9 +920,10 @@ function View:fetch(attempt)
     -- C'est aussi la premiere requete au pont : injoignable ici, il l'est pour
     -- toute la synchro. On ne le redemande pas pour l'agenda et les taches —
     -- chaque essai coute un delai d'attente, ecran fige.
-    local bridge_down
+    local bridge_down, veille
     if via_bridge(cfg) then
-        local pref, perr = Bridge.prefs(cfg)
+        local pref, perr
+        pref, perr, veille = Bridge.prefs(cfg)
         if not pref and is_transport_error(perr) then bridge_down = tostring(perr) end
         for kind, names in pairs(pref or {}) do
             if #names > 0 and G_reader_settings then
@@ -1137,7 +1138,10 @@ function View:fetch(attempt)
     self:redraw("full")
     self:schedule()
     -- Apres l'affichage : la question ne doit pas retarder l'ecran.
-    if use_bridge and not bridge_err then self:propose_update() end
+    if use_bridge and not bridge_err then
+        self:propose_update()
+        self:sync_screensaver(veille)
+    end
 end
 
 function View:stopTimers()
@@ -1380,6 +1384,41 @@ function View:propose_update(dir)
         cancel_text = _("Plus tard"),
         ok_callback = function() install_update(self.cfg, dir) end,
     })
+end
+
+-- Image de veille choisie dans l'app Mac. Telechargee seulement quand son
+-- identifiant change ; la taille annoncee est verifiee avant de remplacer quoi
+-- que ce soit (un transfert coupe donnerait une image tronquee), puis KOReader
+-- est regle dessus. Sans image cote Mac, rien n'est touche : le reglage de
+-- veille de l'appareil garde la main.
+local VEILLE_KEY = "nostrum_screensaver_id"
+
+local function screensaver_dir()
+    local ok, DataStorage = pcall(require, "datastorage")
+    if ok and DataStorage and DataStorage.getDataDir then
+        return DataStorage:getDataDir() .. "/screensaver"
+    end
+end
+
+-- `dir` : dossier jetable des controles de render.lua, jamais sur l'appareil.
+function View:sync_screensaver(info, dir)
+    if type(info) ~= "table" or type(info.id) ~= "string" or not G_reader_settings then return end
+    if G_reader_settings:readSetting(VEILLE_KEY) == info.id then return end
+    local body, err = Bridge.screensaver(self.cfg)
+    if not body or (tonumber(info.size) and #body ~= tonumber(info.size)) then
+        logger.warn("nostrum: image de veille:", err or "taille inattendue, image ignoree")
+        return
+    end
+    dir = dir or screensaver_dir()
+    if not dir then return end
+    os.execute('mkdir -p "' .. dir .. '"')
+    local path = dir .. "/nostrum-veille.png"
+    if not write_file(path .. ".new", body) then return end
+    os.rename(path .. ".new", path)
+    G_reader_settings:saveSetting("screensaver_type", "document_cover")
+    G_reader_settings:saveSetting("screensaver_document_cover", path)
+    G_reader_settings:saveSetting("screensaver_image", path)
+    G_reader_settings:saveSetting(VEILLE_KEY, info.id)
 end
 
 --== Plugin ==================================================================

@@ -318,6 +318,13 @@ eq(Bridge.prefs({ bridge_url = "http://x" }), nil, "pont ancien: pas de reglages
 
 -- Charge incomplete : une seule colonne renvoyee. L'appelant parcourt les deux,
 -- un nil a la place d'un tableau le ferait tomber en pleine synchro.
+-- L'image de veille est annoncee en troisieme retour, absente = nil.
+NetMod.get = function() return '{ calendars = {}, lists = {}, screensaver = { id = "7-12", size = 12 } }', 200 end
+local _, _, annonce = Bridge.prefs({ bridge_url = "http://x" })
+eq(annonce and annonce.id, "7-12", "image de veille annoncee par /prefs")
+NetMod.get = function() return '{ calendars = {}, lists = {} }', 200 end
+eq(select(3, Bridge.prefs({ bridge_url = "http://x" })), nil, "pas d'image de veille = nil")
+
 NetMod.get = function() return '{ calendars = { "David" } }', 200 end
 local partiel = Bridge.prefs({ bridge_url = "http://x" })
 eq(#partiel.lists, 0, "colonne absente = tableau vide, jamais nil")

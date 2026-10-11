@@ -682,6 +682,29 @@ assert(#montres == avant, "aucune question quand les versions concordent")
 UI.show = function() end
 os.execute("rm -rf '" .. maj_dir .. "' '" .. maj_dir .. "/../nostrum-archives'")
 
+-- Image de veille choisie sur le Mac : telechargee une fois par identifiant,
+-- refusee si tronquee, et KOReader regle dessus. Sans image : rien ne bouge.
+local veille_dir = os.tmpname()
+os.remove(veille_dir)
+local telechargements = 0
+local image = "\137PNG fausse image"
+Pont.screensaver = function() telechargements = telechargements + 1; return image end
+reglages["screensaver_type"] = "disable"
+synchro:sync_screensaver(nil, veille_dir)
+assert(telechargements == 0 and reglages["screensaver_type"] == "disable", "sans image cote Mac : rien ne doit changer")
+synchro:sync_screensaver({ id = "1-" .. #image, size = #image + 5 }, veille_dir)
+assert(reglages["screensaver_type"] == "disable", "image tronquee : rien ne doit changer")
+synchro:sync_screensaver({ id = "1-" .. #image, size = #image }, veille_dir)
+local fv = assert(io.open(veille_dir .. "/nostrum-veille.png", "rb"), "image de veille non ecrite")
+assert(fv:read("*a") == image, "image de veille alteree"); fv:close()
+assert(reglages["screensaver_type"] == "document_cover"
+    and reglages["screensaver_document_cover"] == veille_dir .. "/nostrum-veille.png",
+    "KOReader doit etre regle sur l'image recue")
+local avant_dl = telechargements
+synchro:sync_screensaver({ id = "1-" .. #image, size = #image }, veille_dir)
+assert(telechargements == avant_dl, "meme image : pas de nouveau telechargement")
+os.execute("rm -rf '" .. veille_dir .. "'")
+
 local en_clair = ops
 
 -- `vide`, `plein` ou `clair` sortent l'écran correspondant ; sans argument, l'écran garni.

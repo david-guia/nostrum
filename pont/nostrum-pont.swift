@@ -23,6 +23,7 @@ import EventKit
 import Foundation
 import Network
 import Security
+import UniformTypeIdentifiers
 
 let appName = "Nostrum"
 let bundleID = "me.davidguia.nostrum"
@@ -430,6 +431,45 @@ func luaString(_ s: String) -> String {
     return out + "\""
 }
 
+// MARK: - Écran de veille de la Kindle
+
+/// Image choisie dans la fenêtre, servie au Kindle sur /screensaver. Le Kindle
+/// la télécharge quand son identifiant (date + taille) change, à sa synchro.
+let screensaverFile = supportDir.appendingPathComponent("veille.png")
+
+func screensaverInfo() -> [String: Any]? {
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: screensaverFile.path),
+          let size = (attrs[.size] as? NSNumber)?.intValue, size > 0,
+          let date = attrs[.modificationDate] as? Date
+    else { return nil }
+    return ["id": "\(Int(date.timeIntervalSince1970))-\(size)", "size": size]
+}
+
+/// PNG, côté le plus long ramené à 1600 px : assez pour tout écran de Kindle,
+/// assez léger pour passer vite en Wi-Fi. Le Kindle passe lui-même en gris.
+func storeScreensaver(from url: URL) throws {
+    guard let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0 else {
+        throw NSError(domain: appName, code: 3, userInfo: [NSLocalizedDescriptionKey: "Image illisible."])
+    }
+    let scale = min(1, 1600 / max(image.size.width, image.size.height))
+    let w = Int(image.size.width * scale), h = Int(image.size.height * scale)
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h,
+                                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+    else { throw NSError(domain: appName, code: 3, userInfo: [NSLocalizedDescriptionKey: "Conversion impossible."]) }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.black.setFill()
+    NSRect(x: 0, y: 0, width: w, height: h).fill()
+    image.draw(in: NSRect(x: 0, y: 0, width: w, height: h))
+    NSGraphicsContext.restoreGraphicsState()
+    guard let png = rep.representation(using: .png, properties: [:]) else {
+        throw NSError(domain: appName, code: 3, userInfo: [NSLocalizedDescriptionKey: "Conversion impossible."])
+    }
+    try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+    try png.write(to: screensaverFile, options: .atomic)
+}
+
 // MARK: - Secours iCloud
 
 /// Mot de passe d'application du secours iCloud, dans le trousseau de session.
@@ -700,7 +740,17 @@ func route(method: String, path: String, query: String, body: Data, given: Strin
         return (200, json(["events": store.events(days: days)]), asJSON)
 
     case ("GET", "/prefs"):
-        return (200, json(prefs.json()), asJSON)
+        // L'image de veille y est annoncée : le Kindle ne la télécharge que si
+        // son identifiant a changé depuis la dernière fois.
+        var obj = prefs.json()
+        if let veille = screensaverInfo() { obj["screensaver"] = veille }
+        return (200, json(obj), asJSON)
+
+    case ("GET", "/screensaver"):
+        guard let data = try? Data(contentsOf: screensaverFile) else {
+            return (404, json(["error": "aucune image de veille"]), asJSON)
+        }
+        return (200, data, "image/png")
 
     case ("GET", "/plugin"):
         return (200, json(plugin.manifest()), asJSON)
@@ -756,6 +806,7 @@ final class Panel: NSObject, NSApplicationDelegate {
     private let icloudUser = NSTextField(string: "")
     private let icloudPassword = NSSecureTextField(string: "")
     private let icloudState = NSTextField(wrappingLabelWithString: "")
+    private let screensaverPreview = NSImageView()
     private let kindleState = NSTextField(labelWithString: "")
     private let installButton = NSButton(title: "Installer sur la Kindle", target: nil, action: nil)
     private let footer = NSTextField(labelWithString: "")
@@ -940,6 +991,34 @@ final class Panel: NSObject, NSApplicationDelegate {
               "Réinstallez sur la Kindle pour l'effacer aussi de son config.lua, puis révoquez le mot de passe d'application sur account.apple.com.")
     }
 
+    // MARK: Écran de veille
+
+    private func refreshScreensaver() {
+        screensaverPreview.image = NSImage(contentsOf: screensaverFile)
+    }
+
+    @objc func chooseScreensaver() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Choisir"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try storeScreensaver(from: url)
+        } catch {
+            return alert("Image de veille", error.localizedDescription)
+        }
+        refreshScreensaver()
+        alert("Image de veille enregistrée",
+              "La Kindle la récupère à sa prochaine synchronisation (ou touchez le bas de son écran).")
+    }
+
+    @objc func removeScreensaver() {
+        try? FileManager.default.removeItem(at: screensaverFile)
+        refreshScreensaver()
+        alert("Image de veille retirée",
+              "La Kindle garde l'image qu'elle a déjà ; changez-la depuis KOReader si besoin.")
+    }
+
     @objc func openAppleAccount() {
         NSWorkspace.shared.open(URL(string: "https://account.apple.com")!)
     }
@@ -999,6 +1078,25 @@ final class Panel: NSObject, NSApplicationDelegate {
         let drop = NSButton(title: "Retirer", target: self, action: #selector(removeICloud))
         for b in [verify, create, drop] { b.bezelStyle = .rounded }
         let icloudButtons = NSStackView(views: [verify, create, drop])
+
+        // Écran de veille : aperçu + boutons, l'explication à côté.
+        screensaverPreview.imageScaling = .scaleProportionallyUpOrDown
+        screensaverPreview.imageFrameStyle = .grayBezel
+        screensaverPreview.widthAnchor.constraint(equalToConstant: 66).isActive = true
+        screensaverPreview.heightAnchor.constraint(equalToConstant: 88).isActive = true
+        refreshScreensaver()
+        let pick = NSButton(title: "Choisir une image…", target: self, action: #selector(chooseScreensaver))
+        let unpick = NSButton(title: "Retirer", target: self, action: #selector(removeScreensaver))
+        for b in [pick, unpick] { b.bezelStyle = .rounded }
+        let veilleCol = NSStackView(views: [
+            note("Image affichée par la Kindle pendant la veille. Elle lui est transmise à sa prochaine synchronisation, sans câble."),
+            NSStackView(views: [pick, unpick]),
+        ])
+        veilleCol.orientation = .vertical
+        veilleCol.alignment = .leading
+        let veilleRow = NSStackView(views: [screensaverPreview, veilleCol])
+        veilleRow.alignment = .top
+        veilleRow.spacing = 14
         refreshICloud()
         refreshKindle()
 
@@ -1048,6 +1146,9 @@ final class Panel: NSObject, NSApplicationDelegate {
             section("Agenda sans le Mac (facultatif)"),
             note("Mac éteint, la Kindle peut lire l'agenda iCloud directement. Il faut un mot de passe d'application Apple : compte Apple → Connexion et sécurité → Mots de passe pour les apps. Les rappels demandent toujours le Mac."),
             icloudUser, icloudPassword, icloudButtons, icloudState,
+            NSBox.separator(),
+            section("Écran de veille de la Kindle (facultatif)"),
+            veilleRow,
             NSBox.separator(),
             section("Sources affichées"), colonnes,
             note("Coché = affiché sur le Kindle. Tout décocher revient à tout afficher."),

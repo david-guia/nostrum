@@ -71,6 +71,14 @@ d'atteinte (une seule tentative par synchro), elle lit l'agenda sur iCloud en
 CalDAV, garde les tâches déjà affichées et affiche `MAC ÉTEINT`, source
 `ICLOUD`. Le menu garde la liste des calendriers apprise du Mac.
 
+**Image de veille (facultatif)** : section *Écran de veille de la Kindle* de
+l'app Mac. L'image (PNG, côté le plus long ≤ 1600 px) est rangée dans
+`~/Library/Application Support/Nostrum/veille.png`, annoncée dans `/prefs`
+(`screensaver = { id, size }`) et servie sur `/screensaver`. Le Kindle la
+télécharge quand l'identifiant change, vérifie la taille, l'écrit dans
+`koreader/data/screensaver/nostrum-veille.png` et règle KOReader dessus
+(`screensaver_type = document_cover`). Sans image côté Mac, rien n'est touché.
+
 ## Contrôles
 
 ```

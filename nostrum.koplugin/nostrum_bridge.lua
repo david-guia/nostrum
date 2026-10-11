@@ -303,8 +303,20 @@ function Bridge.prefs(cfg)
     if code ~= 200 then return nil, "pont: HTTP " .. tostring(code) end
     local ok, data = pcall(json.decode, body)
     if not ok or type(data) ~= "table" then return nil, "pont: reglages illisibles" end
+    -- Troisieme retour : l'image de veille choisie sur le Mac, { id, size },
+    -- ou nil s'il n'y en a pas (ou si le pont est plus ancien).
+    local veille = type(data.screensaver) == "table" and data.screensaver or nil
     return { calendars = type(data.calendars) == "table" and data.calendars or {},
-             lists = type(data.lists) == "table" and data.lists or {} }
+             lists = type(data.lists) == "table" and data.lists or {} }, nil, veille
+end
+
+-- L'image de veille elle-meme, en binaire. La taille est verifiee par
+-- l'appelant contre celle annoncee dans /prefs.
+function Bridge.screensaver(cfg)
+    local body, code, err = get_any(cfg, "/screensaver")
+    if err then return nil, err end
+    if code ~= 200 then return nil, "pont: HTTP " .. tostring(code) end
+    return body
 end
 
 function Bridge.file(cfg, name)
