@@ -348,6 +348,33 @@ assert(#differes == 1, "le reveil ne doit pas doubler le minuteur")
 horloge:stopTimers()
 assert(#differes == 0, "fermer l'ecran doit arreter l'horloge")
 
+-- Pictogramme Wi-Fi : trois etats lus sur KOReader, rien si KOReader ne sait
+-- pas repondre. Il tient dans le bandeau, a gauche de l'heure.
+local NM = package.loaded["ui/network/manager"]
+local function trace_wifi(on, connecte)
+    NM.isWifiOn = function() return on end
+    NM.isConnected = function() return connecte end
+    ops = {}
+    local v = Nostrum.View:new{ cfg = view.cfg, status = "LIAISON OK", last_sync = noon,
+                                weather = view.weather, events = view.events, todos = view.todos }
+    v:paintTo(bb, 0, 0)
+    check_bounds("wifi " .. tostring(v.wifi_shown))
+    return v, #ops
+end
+local v_ok, n_ok = trace_wifi(true, true)
+local v_on, n_on = trace_wifi(true, false)
+local v_off, n_off = trace_wifi(false, false)
+ops_wifi_coupe = ops
+assert(v_ok.wifi_shown == "connected" and v_on.wifi_shown == "on" and v_off.wifi_shown == "off",
+    "etats Wi-Fi mal lus")
+assert(n_off > n_ok and n_ok > n_on, "coupe = barre en plus ; allume sans connexion = un seul arc")
+NM.isWifiOn, NM.isConnected = nil, nil
+ops = {}
+local v_rien = Nostrum.View:new{ cfg = view.cfg, status = "LIAISON OK" }
+v_rien:paintTo(bb, 0, 0)
+assert(v_rien.wifi_shown == nil, "sans reponse de KOReader : pas d'icone")
+icone_wifi = v_off
+
 -- Barre d'etat d'Amazon : retiree a la veille, au reveil et a chaque minute,
 -- seulement sur Kindle, et sans attendre (commande en arriere-plan).
 local commandes = {}
@@ -651,6 +678,8 @@ elseif mode == "plein" then
     view, ops = plein, chargee
 elseif mode == "clair" then
     view, ops = clair, en_clair
+elseif mode == "wifi" then
+    view, ops = icone_wifi, ops_wifi_coupe
 else
     ops = garni
 end
