@@ -8,3 +8,6 @@ dist/
 debug.txt
 *.png
 .DS_Store
+
+# Images du README.
+!docs/*.png
