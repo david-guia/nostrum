@@ -11,3 +11,4 @@ debug.txt
 
 # Images du README.
 !docs/*.png
+!pont/icone.png
