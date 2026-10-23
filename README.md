@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/icone.png" alt="Icône de Nostrum : un panneau de commande gris avec écrans et interrupteurs" width="128"></p>
+<p align="center"><img src="docs/icone.png" alt="Icône de Nostrum : un boîtier sombre à écran orangé et voyants de couleur" width="128"></p>
 
 # NOSTRUM
 

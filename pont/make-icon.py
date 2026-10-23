@@ -20,7 +20,7 @@ src = src.crop(src.getchannel("A").point(lambda v: 255 if v > 250 else 0).getbbo
 # Carré plein bord à bord : macOS 26+ le découpe lui-même en squircle ; une
 # icône à marges transparentes serait enfermée dans un cadre gris.
 src = src.resize((S, S), Image.LANCZOS)
-big = Image.new("RGBA", (S, S), src.getpixel((S // 2, 40))[:3] + (255,))
+big = Image.new("RGBA", (S, S), src.getpixel((40, S // 2))[:3] + (255,))
 big.alpha_composite(src)
 
 for size in (16, 32, 64, 128, 256, 512):
